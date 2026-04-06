@@ -13,6 +13,7 @@ public class BlueprintPreviewPanel : Widget
 	private PreviewRenderer _renderer;
 	private readonly Dictionary<string, Widget> _elementWidgets = new();
 	private string _selectedId;
+	private FloatingToolbar _toolbar;
 
 	public BlueprintPreviewPanel( Widget parent, PluginBuilderDock dock ) : base( parent )
 	{
@@ -39,6 +40,9 @@ public class BlueprintPreviewPanel : Widget
 		scroll.Canvas.Layout = Layout.Column();
 		_previewContainer = scroll.Canvas;
 		Layout.Add( scroll, 1 );
+
+		// Floating toolbar — overlays the preview, positioned per-element
+		_toolbar = new FloatingToolbar( this, dock );
 
 		_dock.OnBlueprintChanged += RebuildPreview;
 		_dock.OnElementSelected += OnElementSelected;
@@ -71,6 +75,9 @@ public class BlueprintPreviewPanel : Widget
 		{
 			newWidget.SetStyles( "border-left: 3px solid rgba(100,180,255,0.8); border-right: 3px solid rgba(100,180,255,0.8);" );
 		}
+
+		// Show / hide floating toolbar
+		_toolbar.ShowForElement( element );
 	}
 
 	public void RebuildPreview()
@@ -117,6 +124,26 @@ public class BlueprintPreviewPanel : Widget
 		{
 			selWidget.SetStyles( "border-left: 3px solid rgba(100,180,255,0.8); border-right: 3px solid rgba(100,180,255,0.8);" );
 		}
+
+		// Refresh the floating toolbar's attribute list (attributes may have changed)
+		if ( _selectedId != null )
+		{
+			// Find the element from the blueprint to refresh toolbar state
+			var selElement = FindElementById( _dock.ActiveBlueprint?.Elements, _selectedId );
+			_toolbar.ShowForElement( selElement );
+		}
+	}
+
+	private BlueprintElement FindElementById( List<BlueprintElement> elements, string id )
+	{
+		if ( elements == null ) return null;
+		foreach ( var el in elements )
+		{
+			if ( el.Id == id ) return el;
+			var found = FindElementById( el.Children, id );
+			if ( found != null ) return found;
+		}
+		return null;
 	}
 
 	private void RenderElements( Widget container, List<BlueprintElement> elements )

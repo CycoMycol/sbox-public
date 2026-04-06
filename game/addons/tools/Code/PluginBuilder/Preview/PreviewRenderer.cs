@@ -136,10 +136,14 @@ public class PreviewRenderer
 
 		bool wideMode = element.Attributes.ContainsKey( "WideMode" );
 
+		// Build core property content (label + value)
+		var coreContent = new Widget( null );
+
 		if ( wideMode )
 		{
-			// Label on top, value full-width below
-			var labelRow = new Widget( outer );
+			coreContent.Layout = Layout.Column();
+
+			var labelRow = new Widget( coreContent );
 			labelRow.Layout = Layout.Row();
 			labelRow.Layout.Spacing = 4;
 			labelRow.Layout.Margin = new Margin( 4, 2, 4, 0 );
@@ -148,42 +152,38 @@ public class PreviewRenderer
 
 			var label = new Label( labelText, labelRow );
 			labelRow.Layout.Add( label );
-			outer.Layout.Add( labelRow );
+			coreContent.Layout.Add( labelRow );
 
-			var valueWidget = CreateValueWidget( outer, element );
+			var valueWidget = CreateValueWidget( coreContent, element );
 			if ( valueWidget != null )
 			{
-				var valueRow = new Widget( outer );
+				var valueRow = new Widget( coreContent );
 				valueRow.Layout = Layout.Row();
 				valueRow.Layout.Margin = new Margin( 4, 0, 4, 2 );
 				valueRow.Layout.Add( valueWidget, 1 );
-				outer.Layout.Add( valueRow );
+				coreContent.Layout.Add( valueRow );
 			}
 		}
 		else
 		{
-			// Normal: label left, value right
-			var wrapper = new Widget( outer );
-			wrapper.Layout = Layout.Row();
-			wrapper.Layout.Spacing = 8;
-			wrapper.Layout.Margin = new Margin( 4, 2, 4, 2 );
-			wrapper.MinimumHeight = 24;
+			coreContent.Layout = Layout.Row();
+			coreContent.Layout.Spacing = 8;
+			coreContent.Layout.Margin = new Margin( 4, 2, 4, 2 );
+			coreContent.MinimumHeight = 24;
 
-			AddIconIfPresent( wrapper, element );
+			AddIconIfPresent( coreContent, element );
 
-			var label = new Label( labelText, wrapper );
+			var label = new Label( labelText, coreContent );
 			label.MinimumWidth = 120;
-			wrapper.Layout.Add( label );
+			coreContent.Layout.Add( label );
 
-			var valueWidget = CreateValueWidget( wrapper, element );
+			var valueWidget = CreateValueWidget( coreContent, element );
 			if ( valueWidget != null )
-				wrapper.Layout.Add( valueWidget, 1 );
-
-			outer.Layout.Add( wrapper );
+				coreContent.Layout.Add( valueWidget, 1 );
 		}
 
-		// Attribute tags (for non-visual attributes that don't change the rendering)
-		RenderAttributeTags( outer, element );
+		// Position attribute tags around the property content
+		RenderPositionedContent( outer, coreContent, element );
 
 		return outer;
 	}
@@ -198,11 +198,9 @@ public class PreviewRenderer
 		row.Layout.Add( iconBtn );
 	}
 
-	private void RenderAttributeTags( Widget outer, BlueprintElement element )
+	private void RenderPositionedContent( Widget outer, Widget coreContent, BlueprintElement element )
 	{
-		if ( element.Attributes.Count == 0 ) return;
-
-		// Attributes that visually change the rendering — no tag needed
+		// Collect non-visual attribute tags grouped by position
 		var visualAttrs = new HashSet<string>
 		{
 			"TextArea", "Placeholder", "Range", "MinMax", "EnumButtonGroup", "BitFlags",
@@ -215,52 +213,123 @@ public class PreviewRenderer
 			.Where( a => !visualAttrs.Contains( a.Key ) )
 			.ToList();
 
-		if ( tagAttrs.Count == 0 ) return;
+		if ( tagAttrs.Count == 0 )
+		{
+			// No tags — just add core content directly
+			outer.Layout.Add( coreContent );
+			return;
+		}
 
-		var attrRow = new Widget( outer );
-		attrRow.Layout = Layout.Row();
-		attrRow.Layout.Spacing = 4;
-		attrRow.Layout.Margin = new Margin( 124, 0, 4, 2 );
+		var grouped = new Dictionary<AttributePosition, List<KeyValuePair<string, Dictionary<string, object>>>>
+		{
+			[AttributePosition.Above] = new(),
+			[AttributePosition.Below] = new(),
+			[AttributePosition.Left] = new(),
+			[AttributePosition.Right] = new()
+		};
 
 		foreach ( var attr in tagAttrs )
 		{
-			var tagText = $"[{attr.Key}]";
-
-			if ( attr.Key == "ShowIf" || attr.Key == "HideIf" )
-			{
-				var prop = GetString( attr.Value, "property", "" );
-				if ( !string.IsNullOrEmpty( prop ) )
-					tagText = $"[{attr.Key}: {prop}]";
-			}
-			else if ( attr.Key == "Group" || attr.Key == "Feature" || attr.Key == "ToggleGroup" )
-			{
-				var name = GetString( attr.Value, "name", "" );
-				if ( !string.IsNullOrEmpty( name ) )
-					tagText = $"[{attr.Key}: {name}]";
-			}
-			else if ( attr.Key == "Change" )
-			{
-				var cb = GetString( attr.Value, "callback", "" );
-				if ( !string.IsNullOrEmpty( cb ) )
-					tagText = $"[Change: {cb}]";
-			}
-			else if ( attr.Key == "Sync" )
-			{
-				tagText = "[Sync]";
-			}
-			else if ( attr.Key == "RequireComponent" )
-			{
-				var type = GetString( attr.Value, "type", "" );
-				if ( !string.IsNullOrEmpty( type ) )
-					tagText = $"[Requires: {type}]";
-			}
-
-			var tag = new Label( tagText, attrRow );
-			tag.SetStyles( "color: rgba(100,180,255,0.7); font-size: 10px; background-color: rgba(100,180,255,0.1); border-radius: 2px; padding: 1px 4px;" );
-			attrRow.Layout.Add( tag );
+			var pos = AttributePosition.Above;
+			if ( element.AttributePositions.TryGetValue( attr.Key, out var p ) )
+				pos = p;
+			grouped[pos].Add( attr );
 		}
 
-		outer.Layout.Add( attrRow );
+		// Above tags
+		if ( grouped[AttributePosition.Above].Count > 0 )
+			outer.Layout.Add( BuildTagRow( outer, grouped[AttributePosition.Above], element ) );
+
+		// Middle row: optional left | content | optional right
+		bool hasLeft = grouped[AttributePosition.Left].Count > 0;
+		bool hasRight = grouped[AttributePosition.Right].Count > 0;
+
+		if ( hasLeft || hasRight )
+		{
+			var middleRow = new Widget( outer );
+			middleRow.Layout = Layout.Row();
+			middleRow.Layout.Spacing = 4;
+
+			if ( hasLeft )
+				middleRow.Layout.Add( BuildTagColumn( middleRow, grouped[AttributePosition.Left], element ) );
+
+			middleRow.Layout.Add( coreContent, 1 );
+
+			if ( hasRight )
+				middleRow.Layout.Add( BuildTagColumn( middleRow, grouped[AttributePosition.Right], element ) );
+
+			outer.Layout.Add( middleRow );
+		}
+		else
+		{
+			outer.Layout.Add( coreContent );
+		}
+
+		// Below tags
+		if ( grouped[AttributePosition.Below].Count > 0 )
+			outer.Layout.Add( BuildTagRow( outer, grouped[AttributePosition.Below], element ) );
+	}
+
+	private Widget BuildTagRow( Widget parent, List<KeyValuePair<string, Dictionary<string, object>>> tags, BlueprintElement element )
+	{
+		var row = new Widget( parent );
+		row.Layout = Layout.Row();
+		row.Layout.Spacing = 4;
+		row.Layout.Margin = new Margin( 4, 1, 4, 1 );
+
+		foreach ( var attr in tags )
+		{
+			var tagText = FormatTagText( attr.Key, attr.Value );
+			var tag = new Label( tagText, row );
+			tag.SetStyles( "color: rgba(100,180,255,0.7); font-size: 10px; background-color: rgba(100,180,255,0.1); border-radius: 2px; padding: 1px 4px;" );
+			row.Layout.Add( tag );
+		}
+
+		return row;
+	}
+
+	private Widget BuildTagColumn( Widget parent, List<KeyValuePair<string, Dictionary<string, object>>> tags, BlueprintElement element )
+	{
+		var col = new Widget( parent );
+		col.Layout = Layout.Column();
+		col.Layout.Spacing = 2;
+		col.Layout.Margin = new Margin( 2, 0, 2, 0 );
+
+		foreach ( var attr in tags )
+		{
+			var tagText = FormatTagText( attr.Key, attr.Value );
+			var tag = new Label( tagText, col );
+			tag.SetStyles( "color: rgba(100,180,255,0.7); font-size: 10px; background-color: rgba(100,180,255,0.1); border-radius: 2px; padding: 1px 4px;" );
+			col.Layout.Add( tag );
+		}
+
+		return col;
+	}
+
+	private string FormatTagText( string key, Dictionary<string, object> value )
+	{
+		if ( key == "ShowIf" || key == "HideIf" )
+		{
+			var prop = GetString( value, "property", "" );
+			return !string.IsNullOrEmpty( prop ) ? $"[{key}: {prop}]" : $"[{key}]";
+		}
+		if ( key == "Group" || key == "Feature" || key == "ToggleGroup" )
+		{
+			var name = GetString( value, "name", "" );
+			return !string.IsNullOrEmpty( name ) ? $"[{key}: {name}]" : $"[{key}]";
+		}
+		if ( key == "Change" )
+		{
+			var cb = GetString( value, "callback", "" );
+			return !string.IsNullOrEmpty( cb ) ? $"[Change: {cb}]" : "[Change]";
+		}
+		if ( key == "Sync" ) return "[Sync]";
+		if ( key == "RequireComponent" )
+		{
+			var type = GetString( value, "type", "" );
+			return !string.IsNullOrEmpty( type ) ? $"[Requires: {type}]" : "[RequireComponent]";
+		}
+		return $"[{key}]";
 	}
 
 	// ──────────────────────── Value Widgets ────────────────────────

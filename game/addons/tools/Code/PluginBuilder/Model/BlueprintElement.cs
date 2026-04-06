@@ -36,6 +36,12 @@ public class BlueprintElement
 	/// </summary>
 	public string HelpText { get; set; } = "";
 
+	/// <summary>
+	/// Per-attribute positioning relative to the element (e.g. icon left, header above).
+	/// Maps attribute name → position. Attributes not listed default to Above.
+	/// </summary>
+	public Dictionary<string, AttributePosition> AttributePositions { get; set; } = new();
+
 	public BlueprintElement Clone()
 	{
 		var json = JsonSerializer.Serialize( this, BlueprintSerializer.Options );
@@ -76,4 +82,12 @@ public enum PropertyType
 	PhysicsBody,
 	CustomEnum,
 	CustomStruct
+}
+
+public enum AttributePosition
+{
+	Above,
+	Below,
+	Left,
+	Right
 }
