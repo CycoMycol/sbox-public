@@ -198,8 +198,8 @@ public class BlueprintPreviewPanel : Widget
 
 					AddPositionButton( attrSortRow, "arrow_upward", "Above", capturedElement, capturedAttr, AttributePosition.Above, currentPos );
 					AddPositionButton( attrSortRow, "arrow_downward", "Below", capturedElement, capturedAttr, AttributePosition.Below, currentPos );
-					AddPositionButton( attrSortRow, "arrow_back", "Left", capturedElement, capturedAttr, AttributePosition.Left, currentPos );
-					AddPositionButton( attrSortRow, "arrow_forward", "Right", capturedElement, capturedAttr, AttributePosition.Right, currentPos );
+					AddReorderOrPositionButton( attrSortRow, "arrow_back", "Left", capturedElement, capturedAttr, currentPos, -1 );
+					AddReorderOrPositionButton( attrSortRow, "arrow_forward", "Right", capturedElement, capturedAttr, currentPos, 1 );
 
 					// Show current position label
 					var posLabel = new Label( $"[{capturedAttr}] → {currentPos}", attrSortRow );
@@ -390,6 +390,64 @@ public class BlueprintPreviewPanel : Widget
 			_dock.MarkDirty();
 		};
 		row.Layout.Add( btn );
+	}
+
+	/// <summary>
+	/// Left/Right arrow for attributes: reorder among siblings at the same position first.
+	/// Only changes position (Left/Right) when already at the edge or alone.
+	/// </summary>
+	private void AddReorderOrPositionButton( Widget row, string icon, string label, BlueprintElement element, string attrName, AttributePosition currentPos, int direction )
+	{
+		var targetPos = direction < 0 ? AttributePosition.Left : AttributePosition.Right;
+		var btn = new Button( "", icon, row );
+		btn.ToolTip = $"Move attribute {label.ToLower()}";
+		btn.SetStyles( "padding: 1px 3px; font-size: 10px;" );
+		btn.Clicked = () =>
+		{
+			var pos = element.AttributePositions.TryGetValue( attrName, out var ap ) ? ap : AttributePosition.Below;
+
+			// Find sibling attributes at the same position
+			var siblings = element.Attributes.Keys
+				.Where( a => (element.AttributePositions.TryGetValue( a, out var sp ) ? sp : AttributePosition.Below) == pos )
+				.ToList();
+
+			var myIndex = siblings.IndexOf( attrName );
+			var swapIndex = myIndex + direction;
+
+			if ( siblings.Count > 1 && swapIndex >= 0 && swapIndex < siblings.Count )
+			{
+				// Reorder within same position group
+				SwapAttributeOrder( element, attrName, siblings[swapIndex] );
+			}
+			else
+			{
+				// At edge or alone — change position
+				element.AttributePositions[attrName] = targetPos;
+			}
+
+			_selectedAttrName = attrName;
+			_selectedId = element.Id;
+			_dock.MarkDirty();
+		};
+		row.Layout.Add( btn );
+	}
+
+	/// <summary>
+	/// Swaps the iteration order of two attributes in the Attributes dictionary.
+	/// .NET Dictionary maintains insertion order, so we rebuild it.
+	/// </summary>
+	private static void SwapAttributeOrder( BlueprintElement element, string attrA, string attrB )
+	{
+		var entries = element.Attributes.ToList();
+		var idxA = entries.FindIndex( e => e.Key == attrA );
+		var idxB = entries.FindIndex( e => e.Key == attrB );
+		if ( idxA < 0 || idxB < 0 ) return;
+
+		(entries[idxA], entries[idxB]) = (entries[idxB], entries[idxA]);
+
+		element.Attributes.Clear();
+		foreach ( var e in entries )
+			element.Attributes[e.Key] = e.Value;
 	}
 
 	private void MoveElementInPreview( BlueprintElement element, int direction )

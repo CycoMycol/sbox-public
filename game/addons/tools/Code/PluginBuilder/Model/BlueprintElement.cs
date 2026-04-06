@@ -53,9 +53,14 @@ public class BlueprintElement
 	public SpacerDirection SpacerDirection { get; set; } = SpacerDirection.Vertical;
 
 	/// <summary>
-	/// For Space elements: amount of space in pixels.
+	/// For Space elements: vertical space in pixels (height).
 	/// </summary>
 	public float SpacerSize { get; set; } = 8f;
+
+	/// <summary>
+	/// For Space elements: horizontal space in pixels (width).
+	/// </summary>
+	public float SpacerWidth { get; set; } = 0f;
 
 	/// <summary>
 	/// Nested attribute hierarchy. Maps parent attribute name → ordered list of child attribute names.

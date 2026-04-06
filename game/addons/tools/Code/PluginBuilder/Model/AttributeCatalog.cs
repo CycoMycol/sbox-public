@@ -81,8 +81,12 @@ public static class AttributeCatalog
 			new()
 			{
 				Name = "Space", Category = AttributeCategory.Layout, Icon = "space_bar",
-				Description = "Adds vertical space before the property.",
-				Parameters = new() { new() { Name = "height", ParamType = "float", Required = false, DefaultValue = "8" } },
+				Description = "Adds space before the property.",
+				Parameters = new()
+				{
+					new() { Name = "height", ParamType = "float", Required = false, DefaultValue = "8", Description = "Vertical space in pixels" },
+					new() { Name = "width", ParamType = "float", Required = false, DefaultValue = "0", Description = "Horizontal space in pixels" }
+				},
 				CodeExample = "[Space( 16 )]"
 			},
 			new()

@@ -157,45 +157,53 @@ public class ElementInspectorPanel : Widget
 		// Space element editor (only for Space elements)
 		if ( _selected.ElementType == ElementType.Space )
 		{
-			// Direction (horizontal / vertical)
-			canvas.Layout.Add( new Label( "Direction", canvas ) );
-			var dirDropdown = new ComboBox( canvas );
-			dirDropdown.AddItem( "Vertical", null );
-			dirDropdown.AddItem( "Horizontal", null );
-			dirDropdown.CurrentIndex = (int)_selected.SpacerDirection;
-			dirDropdown.ItemChanged += () =>
+			// Height
+			canvas.Layout.Add( new Label( "Height (px)", canvas ) );
+			var heightEntry = new LineEdit( canvas );
+			heightEntry.Text = _selected.SpacerSize.ToString( "F0" );
+			heightEntry.PlaceholderText = "8";
+			heightEntry.TextChanged += ( val ) =>
 			{
-				_selected.SpacerDirection = (SpacerDirection)dirDropdown.CurrentIndex;
-				_selfEditing = true;
-				_dock.MarkDirty();
-				_selfEditing = false;
-			};
-			canvas.Layout.Add( dirDropdown );
+				if ( !float.TryParse( val, out var h ) ) return;
+				if ( h < 0 ) h = 0;
+				if ( h > 500 ) h = 500;
 
-			// Size
-			canvas.Layout.Add( new Label( "Size (px)", canvas ) );
+				_selected.SpacerSize = h;
 
-			var sizeEntry = new LineEdit( canvas );
-			sizeEntry.Text = _selected.SpacerSize.ToString( "F0" );
-			sizeEntry.PlaceholderText = "8";
-			sizeEntry.TextChanged += ( val ) =>
-			{
-				if ( !float.TryParse( val, out var sz ) ) return;
-				if ( sz < 1 ) sz = 1;
-				if ( sz > 500 ) sz = 500;
-
-				_selected.SpacerSize = sz;
-
-				// Also sync to the Space attribute for backward compat
+				// Sync to the Space attribute for backward compat
 				if ( !_selected.Attributes.ContainsKey( "Space" ) )
 					_selected.Attributes["Space"] = new Dictionary<string, object>();
-				_selected.Attributes["Space"]["height"] = sz;
+				_selected.Attributes["Space"]["height"] = h;
 
 				_selfEditing = true;
 				_dock.MarkDirty();
 				_selfEditing = false;
 			};
-			canvas.Layout.Add( sizeEntry );
+			canvas.Layout.Add( heightEntry );
+
+			// Width
+			canvas.Layout.Add( new Label( "Width (px)", canvas ) );
+			var widthEntry = new LineEdit( canvas );
+			widthEntry.Text = _selected.SpacerWidth.ToString( "F0" );
+			widthEntry.PlaceholderText = "0";
+			widthEntry.TextChanged += ( val ) =>
+			{
+				if ( !float.TryParse( val, out var w ) ) return;
+				if ( w < 0 ) w = 0;
+				if ( w > 500 ) w = 500;
+
+				_selected.SpacerWidth = w;
+
+				// Sync to the Space attribute for backward compat
+				if ( !_selected.Attributes.ContainsKey( "Space" ) )
+					_selected.Attributes["Space"] = new Dictionary<string, object>();
+				_selected.Attributes["Space"]["width"] = w;
+
+				_selfEditing = true;
+				_dock.MarkDirty();
+				_selfEditing = false;
+			};
+			canvas.Layout.Add( widthEntry );
 		}
 
 		// Attributes section

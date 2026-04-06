@@ -4,8 +4,8 @@ namespace Editor.PluginBuilder;
 
 /// <summary>
 /// Translates BlueprintElements into live Widget trees for the preview panel.
-/// Uses manual widget construction — NOT ControlWidgets (which require SerializedProperty).
-/// Fully implements attribute effects in the preview.
+/// Renders elements to look and behave like the actual S&Box inspector.
+/// Uses Theme.* colors and Paint.* API for authentic rendering.
 /// </summary>
 public class PreviewRenderer
 {
@@ -115,14 +115,28 @@ public class PreviewRenderer
 			}
 		}
 
-		// [Space] attribute on a property — add vertical space above
+		// [Space] attribute on a property — add space above
 		if ( element.Attributes.TryGetValue( "Space", out var spaceAttrParams ) )
 		{
 			float spaceH = GetFloat( spaceAttrParams, "height", 8f );
-			var spacer = new Widget( outer );
-			spacer.MinimumHeight = spaceH;
-			spacer.MaximumHeight = spaceH;
-			outer.Layout.Add( spacer );
+			float spaceW = GetFloat( spaceAttrParams, "width", 0f );
+
+			if ( spaceH > 0 )
+			{
+				var vSpacer = new Widget( outer );
+				vSpacer.MinimumHeight = spaceH;
+				vSpacer.MaximumHeight = spaceH;
+				outer.Layout.Add( vSpacer );
+			}
+
+			if ( spaceW > 0 )
+			{
+				var hSpacer = new Widget( outer );
+				hSpacer.MinimumWidth = spaceW;
+				hSpacer.MaximumWidth = spaceW;
+				hSpacer.MinimumHeight = 1;
+				outer.Layout.Add( hSpacer );
+			}
 		}
 
 		// Determine label — [Title] overrides Name
@@ -136,54 +150,62 @@ public class PreviewRenderer
 
 		bool wideMode = element.Attributes.ContainsKey( "WideMode" );
 
-		// Build core property content (label + value)
-		var coreContent = new Widget( outer );
+		bool readOnly = element.Attributes.ContainsKey( "ReadOnly" );
+
+		// Inspector-style property row with hover highlight
+		var row = new InspectorPropertyRow( outer, readOnly );
+		row.Cursor = CursorShape.Finger;
+		row.MouseClick = () => _dock.SelectElement( element );
 
 		if ( wideMode )
 		{
-			coreContent.Layout = Layout.Column();
+			row.Layout = Layout.Column();
+			row.Layout.Spacing = 2;
+			row.Layout.Margin = new Margin( 6, 2, 0, 2 );
+			row.MinimumHeight = 24;
 
-			var labelRow = new Widget( coreContent );
+			var labelRow = new Widget( row );
 			labelRow.Layout = Layout.Row();
 			labelRow.Layout.Spacing = 4;
-			labelRow.Layout.Margin = new Margin( 4, 2, 4, 0 );
 
 			AddIconIfPresent( labelRow, element );
 
 			var label = new Label( labelText, labelRow );
+			label.SetStyles( $"color: {Theme.TextControl.Hex}; font-size: 11px;" );
 			labelRow.Layout.Add( label );
-			coreContent.Layout.Add( labelRow );
+			row.Layout.Add( labelRow );
 
-			var valueWidget = CreateValueWidget( coreContent, element );
+			var valueWidget = CreateValueWidget( row, element );
 			if ( valueWidget != null )
 			{
-				var valueRow = new Widget( coreContent );
+				var valueRow = new Widget( row );
 				valueRow.Layout = Layout.Row();
-				valueRow.Layout.Margin = new Margin( 4, 0, 4, 2 );
+				valueRow.Layout.Margin = new Margin( 0, 0, 0, 2 );
 				valueRow.Layout.Add( valueWidget, 1 );
-				coreContent.Layout.Add( valueRow );
+				row.Layout.Add( valueRow );
 			}
 		}
 		else
 		{
-			coreContent.Layout = Layout.Row();
-			coreContent.Layout.Spacing = 8;
-			coreContent.Layout.Margin = new Margin( 4, 2, 4, 2 );
-			coreContent.MinimumHeight = 24;
+			row.Layout = Layout.Row();
+			row.Layout.Spacing = 8;
+			row.Layout.Margin = new Margin( 6, 2, 0, 2 );
+			row.MinimumHeight = Theme.RowHeight;
 
-			AddIconIfPresent( coreContent, element );
+			AddIconIfPresent( row, element );
 
-			var label = new Label( labelText, coreContent );
+			var label = new Label( labelText, row );
 			label.MinimumWidth = 120;
-			coreContent.Layout.Add( label );
+			label.MaximumWidth = 120;
+			label.SetStyles( $"color: {Theme.TextControl.Hex}; font-size: 11px;" );
+			row.Layout.Add( label );
 
-			var valueWidget = CreateValueWidget( coreContent, element );
+			var valueWidget = CreateValueWidget( row, element );
 			if ( valueWidget != null )
-				coreContent.Layout.Add( valueWidget, 1 );
+				row.Layout.Add( valueWidget, 1 );
 		}
 
-		// Add core content to outer
-		outer.Layout.Add( coreContent );
+		outer.Layout.Add( row );
 
 		return outer;
 	}
@@ -232,50 +254,34 @@ public class PreviewRenderer
 			return CreateEnumWidget( parent, element );
 
 		if ( element.PropertyType == PropertyType.Vector3 )
-			return CreateVectorWidget( parent, new[] { "X", "Y", "Z" }, 50 );
+			return CreateVectorWidget( parent, new[] { "X", "Y", "Z" }, 40 );
 
 		if ( element.PropertyType == PropertyType.Vector2 )
 		{
 			if ( element.Attributes.TryGetValue( "MinMax", out var mmParams ) )
 				return CreateMinMaxWidget( parent, element, mmParams );
-			return CreateVectorWidget( parent, new[] { "X", "Y" }, 60 );
+			return CreateVectorWidget( parent, new[] { "X", "Y" }, 40 );
 		}
 
 		if ( element.PropertyType == PropertyType.Angles )
-			return CreateVectorWidget( parent, new[] { "P", "Y", "R" }, 50 );
+			return CreateVectorWidget( parent, new[] { "P", "Y", "R" }, 40 );
 
 		if ( element.PropertyType == PropertyType.GameObject )
-		{
-			var goBtn = new Button( "(none)", "videogame_asset", parent );
-			goBtn.SetStyles( "color: #aaa;" );
-			return goBtn;
-		}
+			return CreateResourceButton( parent, "videogame_asset", "(none)" );
 
 		if ( element.PropertyType == PropertyType.Model )
-		{
-			var mdlBtn = new Button( "(none)", "view_in_ar", parent );
-			mdlBtn.SetStyles( "color: #aaa;" );
-			return mdlBtn;
-		}
+			return CreateResourceButton( parent, "view_in_ar", "(none)" );
 
 		if ( element.PropertyType == PropertyType.Material )
-		{
-			var matBtn = new Button( "(none)", "texture", parent );
-			matBtn.SetStyles( "color: #aaa;" );
-			return matBtn;
-		}
+			return CreateResourceButton( parent, "texture", "(none)" );
 
 		if ( element.PropertyType == PropertyType.PhysicsBody )
-		{
-			var pbBtn = new Button( "(none)", "settings", parent );
-			pbBtn.SetStyles( "color: #aaa;" );
-			return pbBtn;
-		}
+			return CreateResourceButton( parent, "settings", "(none)" );
 
 		if ( element.PropertyType == PropertyType.CustomStruct )
 		{
 			var structLabel = new Label( $"({element.CustomTypeName})", parent );
-			structLabel.SetStyles( "color: #aaa; font-style: italic;" );
+			structLabel.SetStyles( $"color: {Theme.TextControl.WithAlpha( 0.5f ).Hex}; font-style: italic; font-size: 11px;" );
 			return structLabel;
 		}
 
@@ -364,16 +370,26 @@ public class PreviewRenderer
 	{
 		var row = new Widget( parent );
 		row.Layout = Layout.Row();
-		row.Layout.Spacing = 4;
+		row.Layout.Spacing = 0;
+		row.SetStyles( $"background-color: {Theme.ControlBackground.Hex}; border: 1px solid {Theme.BorderLight.Hex}; border-radius: 3px;" );
+		row.MinimumHeight = Theme.RowHeight;
+
+		// Icon
+		var iconLabel = new Button( "", icon, row );
+		iconLabel.SetStyles( $"padding: 2px 4px; background: transparent; color: {Theme.TextControl.WithAlpha( 0.6f ).Hex};" );
+		row.Layout.Add( iconLabel );
 
 		var input = new LineEdit( row );
 		input.Text = element.DefaultValue?.StringValue ?? "";
 		input.PlaceholderText = buttonText;
+		input.SetStyles( "border: none; background: transparent;" );
 		if ( element.Attributes.ContainsKey( "ReadOnly" ) )
 			input.ReadOnly = true;
 		row.Layout.Add( input, 1 );
 
-		var browseBtn = new Button( "", icon, row );
+		// Browse button
+		var browseBtn = new Button( "", "more_horiz", row );
+		browseBtn.SetStyles( $"padding: 2px 4px; background: transparent; color: {Theme.TextControl.WithAlpha( 0.6f ).Hex};" );
 		browseBtn.ToolTip = buttonText;
 		row.Layout.Add( browseBtn );
 
@@ -401,17 +417,42 @@ public class PreviewRenderer
 
 	private Widget CreateColorWidget( Widget parent, BlueprintElement element )
 	{
-		var colorBtn = new Button( "Color", "palette", parent );
+		var row = new Widget( parent );
+		row.Layout = Layout.Row();
+		row.Layout.Spacing = 4;
+		row.MinimumHeight = Theme.RowHeight;
+
+		Color defaultColor = Color.White;
 		if ( element.DefaultValue?.ColorValue != null )
 		{
 			var c = element.DefaultValue.ColorValue;
-			colorBtn.SetStyles( $"background-color: rgba({(int)(c[0] * 255)},{(int)(c[1] * 255)},{(int)(c[2] * 255)},{c[3]});" );
+			defaultColor = new Color( c[0], c[1], c[2], c[3] );
 		}
 
-		if ( element.Attributes.ContainsKey( "Tint" ) )
-			colorBtn.Text = "Tint";
+		// Color swatch — opens a color picker popup when clicked
+		var swatch = new ColorSwatch( row, defaultColor );
+		swatch.MinimumWidth = Theme.RowHeight;
+		swatch.MaximumWidth = Theme.RowHeight;
+		swatch.MinimumHeight = Theme.RowHeight;
+		swatch.MaximumHeight = Theme.RowHeight;
+		swatch.Cursor = CursorShape.Finger;
+		swatch.MouseClick = () =>
+		{
+			ColorPicker.OpenColorPopup( swatch, swatch.CurrentColor, false, ( c ) =>
+			{
+				swatch.CurrentColor = c;
+				swatch.Update();
+			} );
+		};
+		row.Layout.Add( swatch );
 
-		return colorBtn;
+		// Hex value input
+		var hexLabel = new LineEdit( row );
+		hexLabel.Text = defaultColor.Hex;
+		hexLabel.PlaceholderText = "#ffffff";
+		row.Layout.Add( hexLabel, 1 );
+
+		return row;
 	}
 
 	private Widget CreateEnumWidget( Widget parent, BlueprintElement element )
@@ -423,12 +464,18 @@ public class PreviewRenderer
 		{
 			var row = new Widget( parent );
 			row.Layout = Layout.Row();
-			row.Layout.Spacing = 2;
+			row.Layout.Spacing = 0;
+			row.SetStyles( $"border: 1px solid {Theme.BorderLight.Hex}; border-radius: 3px;" );
 
+			bool first = true;
 			foreach ( var val in values )
 			{
 				var btn = new Button( val, parent: row );
+				btn.SetStyles( first
+					? $"background-color: {Theme.Primary.Hex}; color: white; padding: 4px 10px; border-radius: 3px 0 0 3px;"
+					: $"background-color: {Theme.ControlBackground.Hex}; padding: 4px 10px; border-radius: 0;" );
 				row.Layout.Add( btn );
+				first = false;
 			}
 			return row;
 		}
@@ -448,7 +495,9 @@ public class PreviewRenderer
 
 				var cb = new Checkbox( flagRow );
 				flagRow.Layout.Add( cb );
-				flagRow.Layout.Add( new Label( val, flagRow ) );
+				var lbl = new Label( val, flagRow );
+				lbl.SetStyles( $"color: {Theme.TextControl.Hex}; font-size: 11px;" );
+				flagRow.Layout.Add( lbl );
 				col.Layout.Add( flagRow );
 			}
 			return col;
@@ -472,19 +521,26 @@ public class PreviewRenderer
 		return new List<string> { "Value1", "Value2", "Value3" };
 	}
 
+	private static readonly Color[] VectorAxisColors = new[] { Theme.Red, Theme.Green, Theme.Blue };
+
 	private Widget CreateVectorWidget( Widget parent, string[] axes, int inputWidth )
 	{
 		var row = new Widget( parent );
 		row.Layout = Layout.Row();
-		row.Layout.Spacing = 4;
+		row.Layout.Spacing = 2;
 
-		foreach ( var axis in axes )
+		for ( int i = 0; i < axes.Length; i++ )
 		{
-			row.Layout.Add( new Label( axis, row ) );
+			var axisColor = i < VectorAxisColors.Length ? VectorAxisColors[i] : Theme.TextControl;
+
+			var axisLabel = new Label( axes[i], row );
+			axisLabel.SetStyles( $"color: {axisColor.Hex}; font-weight: bold; font-size: 11px; padding: 0 4px; min-width: 16px;" );
+			row.Layout.Add( axisLabel );
+
 			var entry = new LineEdit( row );
 			entry.Text = "0";
-			entry.MinimumWidth = inputWidth;
-			row.Layout.Add( entry );
+			entry.MinimumWidth = 40;
+			row.Layout.Add( entry, 1 );
 		}
 		return row;
 	}
@@ -515,12 +571,11 @@ public class PreviewRenderer
 
 	private Widget CreateSlider( Widget parent, BlueprintElement element, Dictionary<string, object> rangeParams )
 	{
-		var container = new Widget( parent );
-		container.Layout = Layout.Row();
-		container.Layout.Spacing = 4;
+		bool readOnly = element.Attributes.ContainsKey( "ReadOnly" );
 
 		float min = GetFloat( rangeParams, "min", 0f );
 		float max = GetFloat( rangeParams, "max", 100f );
+		float step = GetFloat( rangeParams, "step", 0f );
 
 		float currentValue = element.DefaultValue?.ValueType switch
 		{
@@ -529,17 +584,33 @@ public class PreviewRenderer
 			_ => min
 		};
 
-		var rangeLabel = new Label( $"[{min:F0}\u2013{max:F0}]", container );
-		rangeLabel.SetStyles( "color: #888; font-size: 11px;" );
-		container.Layout.Add( rangeLabel );
+		var container = new Widget( parent );
+		container.Layout = Layout.Row();
+		container.Layout.Spacing = 4;
+		container.MinimumHeight = Theme.RowHeight;
 
+		// Painted slider with fill bar and drag support
+		var slider = new InspectorSlider( container, min, max, currentValue, step );
+		container.Layout.Add( slider, 1 );
+
+		// Numeric input beside slider
 		var numInput = new LineEdit( container );
-		numInput.Text = currentValue.ToString( "F1" );
-		numInput.MinimumWidth = 60;
-		if ( element.Attributes.ContainsKey( "ReadOnly" ) )
-			numInput.ReadOnly = true;
-		container.Layout.Add( numInput, 1 );
+		numInput.Text = element.PropertyType == PropertyType.Int
+			? ((int)currentValue).ToString()
+			: currentValue.ToString( "F1" );
+		numInput.MinimumWidth = 50;
+		numInput.MaximumWidth = 60;
+		if ( readOnly ) numInput.ReadOnly = true;
 
+		// Sync slider drag → text field
+		slider.OnValueChanged = ( val ) =>
+		{
+			numInput.Text = element.PropertyType == PropertyType.Int
+				? ((int)val).ToString()
+				: val.ToString( "F1" );
+		};
+
+		container.Layout.Add( numInput );
 		return container;
 	}
 
@@ -549,37 +620,33 @@ public class PreviewRenderer
 	{
 		var group = new Widget( parent );
 		group.Layout = Layout.Column();
-		group.Layout.Margin = new Margin( 0, 4, 0, 4 );
+		group.Layout.Margin = new Margin( 0, 2, 0, 2 );
 		group.Cursor = CursorShape.Finger;
-		group.MouseClick = () => _dock.SelectElement( element );
 		group.MouseRightClick = () => ShowElementContextMenu( group, element );
 
-		var header = new Widget( group );
-		header.Layout = Layout.Row();
-		header.Layout.Spacing = 4;
-		header.SetStyles( "background-color: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;" );
+		// Group header — styled like ControlSheetGroup GroupHeader with +/- icon
+		var headerWidget = new InspectorGroupHeader( group, element.Name, true );
+		headerWidget.MouseClick = () =>
+		{
+			_dock.SelectElement( element );
+			headerWidget.Toggle();
+		};
+		group.Layout.Add( headerWidget );
 
-		var arrow = new Label( "\u25bc", header );
-		header.Layout.Add( arrow );
-
-		var label = new Label( element.Name, header );
-		label.SetStyles( "font-weight: bold;" );
-		header.Layout.Add( label );
-
-		group.Layout.Add( header );
-
-		var childContainer = new Widget( group );
-		childContainer.Layout = Layout.Column();
-		childContainer.Layout.Margin = new Margin( 16, 0, 0, 0 );
+		// Body container with left gutter line
+		var body = new InspectorGroupBody( group );
+		body.Layout = Layout.Column();
+		body.Layout.Margin = new Margin( 12, 4, 0, 4 );
+		body.Layout.Spacing = 0;
 
 		foreach ( var child in element.Children )
 		{
-			var childWidget = RenderElement( childContainer, child );
+			var childWidget = RenderElement( body, child );
 			if ( childWidget != null )
-				childContainer.Layout.Add( childWidget );
+				body.Layout.Add( childWidget );
 		}
 
-		group.Layout.Add( childContainer );
+		group.Layout.Add( body );
 		return group;
 	}
 
@@ -587,38 +654,47 @@ public class PreviewRenderer
 	{
 		var group = new Widget( parent );
 		group.Layout = Layout.Column();
-		group.Layout.Margin = new Margin( 0, 4, 0, 4 );
+		group.Layout.Margin = new Margin( 0, 2, 0, 2 );
 		group.Cursor = CursorShape.Finger;
-		group.MouseClick = () => _dock.SelectElement( element );
 		group.MouseRightClick = () => ShowElementContextMenu( group, element );
 
-		var toggleHeader = new Widget( group );
-		toggleHeader.Layout = Layout.Row();
-		toggleHeader.Layout.Spacing = 4;
-		toggleHeader.SetStyles( "background-color: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;" );
+		// Header row with toggle checkbox + group header
+		var headerRow = new Widget( group );
+		headerRow.Layout = Layout.Row();
+		headerRow.Layout.Spacing = 6;
+		headerRow.Layout.Margin = new Margin( 4, 2, 0, 2 );
+		headerRow.MinimumHeight = Theme.RowHeight;
 
-		var toggle = new Checkbox( toggleHeader );
+		var toggle = new Checkbox( headerRow );
 		toggle.Value = true;
-		toggleHeader.Layout.Add( toggle );
+		toggle.FixedWidth = 17;
+		toggle.FixedHeight = 17;
+		headerRow.Layout.Add( toggle );
 
-		var label = new Label( element.Name, toggleHeader );
-		label.SetStyles( "font-weight: bold;" );
-		toggleHeader.Layout.Add( label );
+		var headerWidget = new InspectorGroupHeader( headerRow, element.Name, true );
+		headerWidget.MouseClick = () =>
+		{
+			_dock.SelectElement( element );
+			headerWidget.Toggle();
+		};
+		headerRow.Layout.Add( headerWidget, 1 );
 
-		group.Layout.Add( toggleHeader );
+		group.Layout.Add( headerRow );
 
-		var childContainer = new Widget( group );
-		childContainer.Layout = Layout.Column();
-		childContainer.Layout.Margin = new Margin( 16, 0, 0, 0 );
+		// Body with gutter
+		var body = new InspectorGroupBody( group );
+		body.Layout = Layout.Column();
+		body.Layout.Margin = new Margin( 12, 4, 0, 4 );
+		body.Layout.Spacing = 0;
 
 		foreach ( var child in element.Children )
 		{
-			var childWidget = RenderElement( childContainer, child );
+			var childWidget = RenderElement( body, child );
 			if ( childWidget != null )
-				childContainer.Layout.Add( childWidget );
+				body.Layout.Add( childWidget );
 		}
 
-		group.Layout.Add( childContainer );
+		group.Layout.Add( body );
 		return group;
 	}
 
@@ -626,25 +702,28 @@ public class PreviewRenderer
 	{
 		var feature = new Widget( parent );
 		feature.Layout = Layout.Column();
-		feature.Layout.Margin = new Margin( 0, 4, 0, 4 );
+		feature.Layout.Margin = new Margin( 0, 2, 0, 2 );
 		feature.Cursor = CursorShape.Finger;
 		feature.MouseClick = () => _dock.SelectElement( element );
 		feature.MouseRightClick = () => ShowElementContextMenu( feature, element );
 
+		// Tab-like header with Theme colors
 		var header = new Widget( feature );
 		header.Layout = Layout.Row();
-		header.SetStyles( "background-color: rgba(100,180,255,0.15); padding: 4px 8px; border-radius: 4px 4px 0 0;" );
+		header.MinimumHeight = Theme.RowHeight;
+		header.SetStyles( $"background-color: {Theme.Primary.WithAlpha( 0.15f ).Hex}; padding: 4px 8px; border-radius: 4px 4px 0 0;" );
 
-		var tabLabel = new Label( $"\u2b21 {element.Name}", header );
-		tabLabel.SetStyles( "font-weight: bold; color: #6ab4ff;" );
+		var tabLabel = new Label( element.Name, header );
+		tabLabel.SetStyles( $"font-weight: bold; font-size: 11px; color: {Theme.Primary.Hex};" );
 		header.Layout.Add( tabLabel );
 
+		header.Layout.AddStretchCell( 1 );
 		feature.Layout.Add( header );
 
 		var childContainer = new Widget( feature );
 		childContainer.Layout = Layout.Column();
-		childContainer.Layout.Margin = new Margin( 16, 4, 0, 4 );
-		childContainer.SetStyles( "border-left: 2px solid rgba(100,180,255,0.3);" );
+		childContainer.Layout.Margin = new Margin( 12, 4, 0, 4 );
+		childContainer.SetStyles( $"border-left: 2px solid {Theme.Primary.WithAlpha( 0.3f ).Hex};" );
 
 		foreach ( var child in element.Children )
 		{
@@ -662,7 +741,7 @@ public class PreviewRenderer
 	private Widget RenderHeader( Widget parent, BlueprintElement element )
 	{
 		var header = new Label( element.Name, parent );
-		header.SetStyles( "font-weight: bold; font-size: 12px; padding: 8px 0 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);" );
+		header.SetStyles( $"font-weight: bold; font-size: 11px; padding: 8px 6px 4px 6px; color: {Theme.Text.Hex}; border-bottom: 1px solid {Theme.BorderLight.Hex};" );
 		header.Cursor = CursorShape.Finger;
 		header.MouseClick = () => _dock.SelectElement( element );
 		header.MouseRightClick = () => ShowElementContextMenu( header, element );
@@ -676,51 +755,85 @@ public class PreviewRenderer
 		spacer.MouseClick = () => _dock.SelectElement( element );
 		spacer.MouseRightClick = () => ShowElementContextMenu( spacer, element );
 
-		float size = element.SpacerSize;
-		if ( size <= 0 )
-		{
-			// Fallback to attribute-based height for backward compat
-			if ( element.Attributes.TryGetValue( "Space", out var spaceParams ) )
-				size = GetFloat( spaceParams, "height", 8f );
-			else
-				size = 8f;
-		}
+		float height = element.SpacerSize;
+		float width = element.SpacerWidth;
 
-		if ( element.SpacerDirection == SpacerDirection.Horizontal )
+		// Fallback to attribute-based values for backward compat
+		if ( height <= 0 && element.Attributes.TryGetValue( "Space", out var spaceParams ) )
+			height = GetFloat( spaceParams, "height", 8f );
+		if ( width <= 0 && element.Attributes.TryGetValue( "Space", out var spaceParamsW ) )
+			width = GetFloat( spaceParamsW, "width", 0f );
+
+		// Apply height (vertical space between elements)
+		if ( height > 0 )
 		{
-			spacer.MinimumWidth = size;
-			spacer.MaximumWidth = size;
-			spacer.MinimumHeight = 4;
-			spacer.MaximumHeight = 4;
+			spacer.MinimumHeight = height;
+			spacer.MaximumHeight = height;
 		}
 		else
 		{
-			spacer.MinimumHeight = size;
-			spacer.MaximumHeight = size;
+			// Default minimum height
+			spacer.MinimumHeight = 8;
+			spacer.MaximumHeight = 8;
 		}
 
-		spacer.SetStyles( "background-color: rgba(255,255,255,0.02);" );
+		// Apply width (horizontal space — only constrains if set)
+		if ( width > 0 )
+		{
+			spacer.MinimumWidth = width;
+			spacer.MaximumWidth = width;
+		}
+
+		spacer.SetStyles( "background-color: transparent;" );
 		return spacer;
 	}
 
 	private Widget RenderInfoBox( Widget parent, BlueprintElement element )
 	{
+		var bgColor = "rgba(60,130,255,0.12)";
+		var borderColor = "rgba(60,130,255,0.3)";
+
 		var box = new Widget( parent );
 		box.Layout = Layout.Row();
 		box.Layout.Spacing = 8;
-		box.Layout.Margin = new Margin( 4, 4, 4, 4 );
-		box.SetStyles( "background-color: rgba(60,130,255,0.15); border-radius: 4px; padding: 8px;" );
+		box.Layout.Margin = new Margin( 6, 6, 6, 6 );
+		box.SetStyles( $"background-color: {bgColor}; border: 1px solid {borderColor}; border-radius: 4px; padding: 8px;" );
+		box.MinimumHeight = 36;
 		box.Cursor = CursorShape.Finger;
 		box.MouseClick = () => _dock.SelectElement( element );
 		box.MouseRightClick = () => ShowElementContextMenu( box, element );
 
-		var iconLabel = new Label( "\u2139", box );
-		box.Layout.Add( iconLabel );
+		var iconWidget = new Button( "", "info", box );
+		iconWidget.SetStyles( "background: transparent; padding: 0;" );
+		box.Layout.Add( iconWidget );
 
 		var text = new Label( element.Name, box );
+		text.SetStyles( $"color: {Theme.TextControl.Hex}; font-size: 11px;" );
 		box.Layout.Add( text, 1 );
 
 		return box;
+	}
+
+	// ──────────────────────── Resource Buttons ────────────────────────
+
+	private Widget CreateResourceButton( Widget parent, string icon, string placeholder )
+	{
+		var row = new Widget( parent );
+		row.Layout = Layout.Row();
+		row.Layout.Spacing = 0;
+		row.SetStyles( $"background-color: {Theme.ControlBackground.Hex}; border: 1px solid {Theme.BorderLight.Hex}; border-radius: 3px;" );
+		row.MinimumHeight = Theme.RowHeight;
+
+		var iconWidget = new Button( "", icon, row );
+		iconWidget.SetStyles( $"padding: 2px 6px; background: transparent; color: {Theme.TextControl.WithAlpha( 0.6f ).Hex};" );
+		iconWidget.ToolTip = "Browse...";
+		row.Layout.Add( iconWidget );
+
+		var textLabel = new Label( placeholder, row );
+		textLabel.SetStyles( $"color: {Theme.TextControl.WithAlpha( 0.4f ).Hex}; font-size: 11px; padding: 0 4px;" );
+		row.Layout.Add( textLabel, 1 );
+
+		return row;
 	}
 
 	// ──────────────────────── Context Menu ────────────────────────
@@ -852,5 +965,261 @@ public class PreviewRenderer
 		}
 
 		return fallback;
+	}
+}
+
+// ──────────────────────── Custom Widget Classes ────────────────────────
+
+/// <summary>
+/// Inspector-style property row with subtle hover highlighting.
+/// </summary>
+class InspectorPropertyRow : Widget
+{
+	private readonly bool _readOnly;
+
+	public InspectorPropertyRow( Widget parent, bool readOnly = false ) : base( parent )
+	{
+		_readOnly = readOnly;
+		MouseTracking = true;
+	}
+
+	protected override void OnPaint()
+	{
+		base.OnPaint();
+
+		if ( Paint.HasMouseOver )
+		{
+			Paint.ClearPen();
+			Paint.SetBrush( Theme.Blue.WithAlpha( 0.04f ) );
+			Paint.DrawRect( LocalRect );
+		}
+
+		if ( _readOnly )
+		{
+			Paint.ClearPen();
+			Paint.SetBrush( Color.White.WithAlpha( 0.02f ) );
+			Paint.DrawRect( LocalRect );
+		}
+	}
+}
+
+/// <summary>
+/// Inspector-style group header with +/- toggle icon, matching ControlSheetGroup GroupHeader.
+/// </summary>
+class InspectorGroupHeader : Widget
+{
+	public string Title { get; set; }
+	private bool _expanded = true;
+	public Action OnToggled;
+
+	public InspectorGroupHeader( Widget parent, string title, bool startExpanded = true ) : base( parent )
+	{
+		Title = title;
+		_expanded = startExpanded;
+		FixedHeight = Theme.RowHeight;
+		Cursor = CursorShape.Finger;
+		MouseTracking = true;
+	}
+
+	public void Toggle()
+	{
+		_expanded = !_expanded;
+		OnToggled?.Invoke();
+		Update();
+	}
+
+	protected override void OnPaint()
+	{
+		base.OnPaint();
+
+		// Background pill (like GroupHeader from ControlSheetGroup)
+		var bgRect = LocalRect.Shrink( 3, 4, 4, 4 );
+		bgRect.Height = Theme.RowHeight - 8;
+		bgRect.Width = bgRect.Height;
+
+		var bgColor = Theme.WindowBackground.Lighten( 0.2f ).WithAlphaMultiplied( _expanded ? 1f : 0.5f );
+		Paint.SetBrushAndPen( bgColor );
+		Paint.DrawRect( bgRect, 6 );
+		Paint.ClearBrush();
+
+		// +/- icon
+		float iconIntensity = Paint.HasMouseOver ? 1.5f : 1f;
+		if ( _expanded )
+		{
+			Paint.Pen = Theme.TextControl.WithAlpha( 0.2f * iconIntensity );
+			Paint.DrawIcon( bgRect, "remove", 12, TextFlag.Center );
+		}
+		else
+		{
+			Paint.Pen = Theme.TextControl.WithAlpha( 0.4f * iconIntensity );
+			Paint.DrawIcon( bgRect, "add", 12, TextFlag.Center );
+		}
+
+		// Group title text
+		Paint.Pen = Theme.TextControl.WithAlpha( _expanded ? 1f : 0.8f );
+		Paint.SetDefaultFont( 11, weight: 400, sizeInPixels: true );
+		Paint.DrawText( LocalRect.Shrink( 26, 0, 0, 0 ), Title, TextFlag.LeftCenter );
+	}
+}
+
+/// <summary>
+/// Group body with left gutter line, matching ControlSheetGroup.
+/// </summary>
+class InspectorGroupBody : Widget
+{
+	public InspectorGroupBody( Widget parent ) : base( parent )
+	{
+	}
+
+	protected override void OnPaint()
+	{
+		base.OnPaint();
+
+		// Left gutter line
+		var r = LocalRect.Shrink( 4, 4, 0, 0 );
+		r.Width = 3;
+		Paint.SetBrushAndPen( Theme.WindowBackground );
+		Paint.DrawRect( r, 5 );
+
+		// Bottom cap
+		var capRect = LocalRect.Shrink( 6, 0, 0, 0 );
+		capRect.Top = capRect.Bottom - 3;
+		capRect.Width = 8;
+		Paint.SetBrushAndPen( Theme.WindowBackground );
+		Paint.DrawRect( capRect, 5 );
+	}
+}
+
+/// <summary>
+/// Interactive range slider with fill bar and mouse drag support.
+/// Matches the inspector's built-in slider appearance using Paint API.
+/// </summary>
+class InspectorSlider : Widget
+{
+	public float Min { get; set; }
+	public float Max { get; set; }
+	public float Value { get; set; }
+	public float Step { get; set; }
+	public Action<float> OnValueChanged { get; set; }
+
+	private bool _dragging;
+
+	public InspectorSlider( Widget parent, float min, float max, float value, float step = 0f ) : base( parent )
+	{
+		Min = min;
+		Max = max;
+		Value = Math.Clamp( value, min, max );
+		Step = step;
+		MinimumHeight = Theme.RowHeight;
+		Cursor = CursorShape.Finger;
+		MouseTracking = true;
+	}
+
+	protected override void OnPaint()
+	{
+		base.OnPaint();
+
+		var rect = LocalRect.Shrink( 1 );
+
+		// Track background
+		Paint.ClearPen();
+		Paint.SetBrush( Theme.ControlBackground );
+		Paint.DrawRect( rect, 3 );
+
+		// Fill bar
+		float fraction = (Max > Min) ? (Value - Min) / (Max - Min) : 0f;
+		fraction = Math.Clamp( fraction, 0f, 1f );
+		var fillRect = rect;
+		fillRect.Width = rect.Width * fraction;
+
+		Paint.SetBrush( Theme.Primary.WithAlpha( 0.6f ) );
+		Paint.DrawRect( fillRect, 3 );
+
+		// Value text centered on track
+		Paint.ClearBrush();
+		Paint.Pen = Theme.TextControl;
+		Paint.SetDefaultFont( 10, weight: 400, sizeInPixels: true );
+		Paint.DrawText( rect, Value.ToString( Step >= 1f ? "F0" : "F1" ), TextFlag.Center );
+	}
+
+	protected override void OnMousePress( MouseEvent e )
+	{
+		base.OnMousePress( e );
+		if ( e.Button == MouseButtons.Left )
+		{
+			_dragging = true;
+			UpdateFromMouse( e.LocalPosition.x );
+		}
+	}
+
+	protected override void OnMouseMove( MouseEvent e )
+	{
+		base.OnMouseMove( e );
+		if ( _dragging )
+			UpdateFromMouse( e.LocalPosition.x );
+	}
+
+	protected override void OnMouseReleased( MouseEvent e )
+	{
+		base.OnMouseReleased( e );
+		_dragging = false;
+	}
+
+	private void UpdateFromMouse( float localX )
+	{
+		float fraction = Math.Clamp( localX / Width, 0f, 1f );
+		float newValue = Min + fraction * (Max - Min);
+
+		if ( Step > 0f )
+			newValue = MathF.Round( newValue / Step ) * Step;
+
+		newValue = Math.Clamp( newValue, Min, Max );
+
+		if ( MathF.Abs( newValue - Value ) > 0.001f )
+		{
+			Value = newValue;
+			OnValueChanged?.Invoke( Value );
+			Update();
+		}
+	}
+}
+
+/// <summary>
+/// Color swatch widget that displays a filled color rectangle with transparency checkerboard.
+/// </summary>
+class ColorSwatch : Widget
+{
+	public Color CurrentColor { get; set; }
+
+	public ColorSwatch( Widget parent, Color color ) : base( parent )
+	{
+		CurrentColor = color;
+		MouseTracking = true;
+	}
+
+	protected override void OnPaint()
+	{
+		base.OnPaint();
+
+		var rect = LocalRect.Shrink( 2 );
+
+		// Checker background for alpha visibility
+		Paint.ClearPen();
+		Paint.SetBrush( Color.White );
+		Paint.DrawRect( rect, 3 );
+		Paint.SetBrush( Color.Gray.WithAlpha( 0.3f ) );
+		var halfW = rect.Width / 2;
+		var halfH = rect.Height / 2;
+		Paint.DrawRect( new Rect( rect.Left, rect.Top, halfW, halfH ) );
+		Paint.DrawRect( new Rect( rect.Left + halfW, rect.Top + halfH, halfW, halfH ) );
+
+		// Color fill
+		Paint.SetBrush( CurrentColor );
+		Paint.DrawRect( rect, 3 );
+
+		// Border
+		Paint.ClearBrush();
+		Paint.SetPen( Theme.BorderLight );
+		Paint.DrawRect( rect, 3 );
 	}
 }
