@@ -78,6 +78,9 @@ engine/TestResults/
 /game/**/obj
 /game/**/launchSettings.json
 
+# Cyco private plugin (symlinked from Cyco_Tools)
+/game/addons/tools/Code/PluginBuilder/
+
 #
 # Game debris
 #
