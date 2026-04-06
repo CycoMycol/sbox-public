@@ -111,57 +111,17 @@ public class FloatingToolbar : Widget
 
 	private void BuildAttributeToolbar()
 	{
-		// Back to element
-		var backBtn = new Button( "", "arrow_back", this );
-		backBtn.ToolTip = "Back to Element";
-		backBtn.SetStyles( "padding: 2px 4px;" );
-		backBtn.Clicked = () =>
-		{
-			_selectedAttrName = null;
-			_dock.SelectElement( _element );
-			Rebuild();
-		};
-		Layout.Add( backBtn );
-
-		var attrLabel = new Label( $"[{_selectedAttrName}]", this );
-		attrLabel.SetStyles( "color: #6ab4ff; font-weight: bold; font-size: 11px; padding: 0 4px;" );
-		Layout.Add( attrLabel );
+		// Add Attribute
+		var addAttrBtn = new Button( "", "label", this );
+		addAttrBtn.ToolTip = "Add Attribute";
+		addAttrBtn.SetStyles( "padding: 2px 4px;" );
+		addAttrBtn.Clicked = () => ShowAddAttributeMenu( addAttrBtn );
+		Layout.Add( addAttrBtn );
 
 		AddSep();
 
-		// Position buttons
-		var currentPos = AttributePosition.Above;
-		if ( _element.AttributePositions.TryGetValue( _selectedAttrName, out var pos ) )
-			currentPos = pos;
-
-		var posButtons = new (string icon, string tip, AttributePosition pos)[]
-		{
-			("arrow_back", "Position: Left", AttributePosition.Left),
-			("arrow_upward", "Position: Above", AttributePosition.Above),
-			("arrow_downward", "Position: Below", AttributePosition.Below),
-			("arrow_forward", "Position: Right", AttributePosition.Right)
-		};
-
-		var attrName = _selectedAttrName;
-		foreach ( var (icon, tip, p) in posButtons )
-		{
-			var btn = new Button( "", icon, this );
-			btn.ToolTip = tip;
-			btn.SetStyles( currentPos == p
-				? "padding: 2px 3px; background-color: rgba(100,180,255,0.3); border-radius: 3px;"
-				: "padding: 2px 3px;" );
-			btn.Clicked = () =>
-			{
-				_element.AttributePositions[attrName] = p;
-				_dock.MarkDirty();
-				Rebuild();
-			};
-			Layout.Add( btn );
-		}
-
-		AddSep();
-
-		// Remove attribute
+		// Duplicate (not applicable for attributes — kept for visual consistency but hidden)
+		// Delete
 		var removeBtn = new Button( "", "delete", this );
 		removeBtn.ToolTip = $"Remove [{_selectedAttrName}]";
 		removeBtn.SetStyles( "padding: 2px 4px; color: #ff6b6b;" );
@@ -218,7 +178,7 @@ public class FloatingToolbar : Widget
 			menu.AddOption( $"[{attr.Name}]", attr.Icon, () =>
 			{
 				_element.Attributes[attr.Name] = new Dictionary<string, object>();
-				_element.AttributePositions[attr.Name] = AttributePosition.Above;
+				_element.AttributePositions[attr.Name] = AttributePosition.Below;
 				_dock.MarkDirty();
 			} );
 		}

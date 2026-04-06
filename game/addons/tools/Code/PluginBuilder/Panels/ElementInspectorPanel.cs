@@ -87,6 +87,40 @@ public class ElementInspectorPanel : Widget
 		typeLabel.SetStyles( "color: #aaa; font-size: 11px;" );
 		canvas.Layout.Add( typeLabel );
 
+		// Hidden element banner
+		if ( _selected.Hidden )
+		{
+			var hiddenRow = new Widget( canvas );
+			hiddenRow.Layout = Layout.Row();
+			hiddenRow.Layout.Spacing = 6;
+			hiddenRow.SetStyles( "background-color: rgba(255,180,0,0.15); border: 1px solid rgba(255,180,0,0.3); border-radius: 4px; padding: 4px 8px;" );
+
+			var hiddenIcon = new Label( "visibility_off", hiddenRow );
+			hiddenIcon.SetStyles( "font-size: 14px; color: #ffb400;" );
+			hiddenRow.Layout.Add( hiddenIcon );
+
+			var hiddenLabel = new Label( "This element is hidden", hiddenRow );
+			hiddenLabel.SetStyles( "color: #ffb400; font-size: 11px;" );
+			hiddenRow.Layout.Add( hiddenLabel );
+
+			hiddenRow.Layout.AddStretchCell( 1 );
+
+			var unhideBtn = new Button( "Unhide", "visibility", hiddenRow );
+			unhideBtn.SetStyles( "padding: 2px 6px; font-size: 10px;" );
+			unhideBtn.Clicked = () =>
+			{
+				_selected.Hidden = false;
+				_selfEditing = true;
+				_dock.MarkDirty();
+				_selfEditing = false;
+				Rebuild();
+			};
+			hiddenRow.Layout.Add( unhideBtn );
+
+			canvas.Layout.Add( hiddenRow );
+			canvas.Layout.AddSpacingCell( 4 );
+		}
+
 		// Name
 		canvas.Layout.Add( new Label( "Name", canvas ) );
 		var nameEntry = new LineEdit( canvas );
@@ -120,44 +154,48 @@ public class ElementInspectorPanel : Widget
 			canvas.Layout.Add( typeDropdown );
 		}
 
-		// Space height editor (only for Space elements)
+		// Space element editor (only for Space elements)
 		if ( _selected.ElementType == ElementType.Space )
 		{
-			canvas.Layout.Add( new Label( "Height", canvas ) );
-
-			// Read current height from the Space attribute
-			float currentHeight = 8f;
-			if ( _selected.Attributes.TryGetValue( "Space", out var spaceParams ) )
+			// Direction (horizontal / vertical)
+			canvas.Layout.Add( new Label( "Direction", canvas ) );
+			var dirDropdown = new ComboBox( canvas );
+			dirDropdown.AddItem( "Vertical", null );
+			dirDropdown.AddItem( "Horizontal", null );
+			dirDropdown.CurrentIndex = (int)_selected.SpacerDirection;
+			dirDropdown.ItemChanged += () =>
 			{
-				if ( spaceParams.TryGetValue( "height", out var hVal ) )
-				{
-					if ( hVal is float f ) currentHeight = f;
-					else if ( hVal is double d ) currentHeight = (float)d;
-					else if ( hVal is int i ) currentHeight = i;
-					else if ( hVal is long l ) currentHeight = l;
-					else if ( hVal is string s && float.TryParse( s, out var parsed ) ) currentHeight = parsed;
-					else if ( hVal is System.Text.Json.JsonElement je && je.ValueKind == System.Text.Json.JsonValueKind.Number ) currentHeight = je.GetSingle();
-				}
-			}
-
-			var heightEntry = new LineEdit( canvas );
-			heightEntry.Text = currentHeight.ToString( "F0" );
-			heightEntry.PlaceholderText = "8";
-			heightEntry.TextChanged += ( val ) =>
-			{
-				if ( !float.TryParse( val, out var h ) ) return;
-				if ( h < 1 ) h = 1;
-				if ( h > 200 ) h = 200;
-
-				if ( !_selected.Attributes.ContainsKey( "Space" ) )
-					_selected.Attributes["Space"] = new Dictionary<string, object>();
-
-				_selected.Attributes["Space"]["height"] = h;
+				_selected.SpacerDirection = (SpacerDirection)dirDropdown.CurrentIndex;
 				_selfEditing = true;
 				_dock.MarkDirty();
 				_selfEditing = false;
 			};
-			canvas.Layout.Add( heightEntry );
+			canvas.Layout.Add( dirDropdown );
+
+			// Size
+			canvas.Layout.Add( new Label( "Size (px)", canvas ) );
+
+			var sizeEntry = new LineEdit( canvas );
+			sizeEntry.Text = _selected.SpacerSize.ToString( "F0" );
+			sizeEntry.PlaceholderText = "8";
+			sizeEntry.TextChanged += ( val ) =>
+			{
+				if ( !float.TryParse( val, out var sz ) ) return;
+				if ( sz < 1 ) sz = 1;
+				if ( sz > 500 ) sz = 500;
+
+				_selected.SpacerSize = sz;
+
+				// Also sync to the Space attribute for backward compat
+				if ( !_selected.Attributes.ContainsKey( "Space" ) )
+					_selected.Attributes["Space"] = new Dictionary<string, object>();
+				_selected.Attributes["Space"]["height"] = sz;
+
+				_selfEditing = true;
+				_dock.MarkDirty();
+				_selfEditing = false;
+			};
+			canvas.Layout.Add( sizeEntry );
 		}
 
 		// Attributes section

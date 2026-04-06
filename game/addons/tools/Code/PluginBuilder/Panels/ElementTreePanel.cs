@@ -5,6 +5,7 @@ namespace Editor.PluginBuilder;
 /// <summary>
 /// Tree view showing the blueprint element hierarchy.
 /// Supports drag-to-reorder, right-click context menus, remove, duplicate.
+/// Eyeball visibility toggle on each item. Attribute sorting and nesting.
 /// </summary>
 public class ElementTreePanel : Widget
 {
@@ -12,6 +13,7 @@ public class ElementTreePanel : Widget
 	private TreeView _tree;
 	private LineEdit _searchBar;
 	private BlueprintElement _selectedElement;
+	private string _selectedAttrName;
 
 	public ElementTreePanel( Widget parent, PluginBuilderDock dock ) : base( parent )
 	{
@@ -32,12 +34,12 @@ public class ElementTreePanel : Widget
 
 		var upBtn = new Button( "", "arrow_upward", header );
 		upBtn.Clicked = () => MoveSelected( -1 );
-		upBtn.ToolTip = "Move selected element up";
+		upBtn.ToolTip = "Move selected item up";
 		header.Layout.Add( upBtn );
 
 		var downBtn = new Button( "", "arrow_downward", header );
 		downBtn.Clicked = () => MoveSelected( 1 );
-		downBtn.ToolTip = "Move selected element down";
+		downBtn.ToolTip = "Move selected item down";
 		header.Layout.Add( downBtn );
 
 		var addBtn = new Button( "", "add", header );
@@ -50,8 +52,8 @@ public class ElementTreePanel : Widget
 		_searchBar.PlaceholderText = "Search elements...";
 		_searchBar.TextChanged += ( val ) => FilterTree( val );
 
-		// Tree view
-		_tree = new TreeView( this );
+		// Tree view (custom subclass handles eyeball clicks)
+		_tree = new VisibilityTreeView( this, dock );
 		_tree.ItemSelected = ( item ) => OnItemSelected( item );
 		Layout.Add( _tree, 1 );
 
@@ -90,11 +92,11 @@ public class ElementTreePanel : Widget
 		else
 			parent.AddItem( node );
 
-		// Add attribute sub-nodes
-		foreach ( var attr in element.Attributes )
+		// Add attribute sub-nodes (respecting nesting via AttributeChildren)
+		var topLevelAttrs = GetTopLevelAttributes( element );
+		foreach ( var attrName in topLevelAttrs )
 		{
-			var attrNode = new AttributeTreeNode( element, attr.Key, _dock );
-			node.AddItem( attrNode );
+			AddAttributeTreeNode( node, element, attrName );
 		}
 
 		foreach ( var child in element.Children )
@@ -103,24 +105,70 @@ public class ElementTreePanel : Widget
 		}
 	}
 
+	private void AddAttributeTreeNode( TreeNode parent, BlueprintElement element, string attrName )
+	{
+		var attrNode = new AttributeTreeNode( element, attrName, _dock );
+		parent.AddItem( attrNode );
+
+		// Add nested child attributes
+		if ( element.AttributeChildren.TryGetValue( attrName, out var children ) )
+		{
+			foreach ( var childAttr in children )
+			{
+				AddAttributeTreeNode( attrNode, element, childAttr );
+			}
+		}
+	}
+
+	/// <summary>
+	/// Returns attribute names that are NOT children of any other attribute.
+	/// </summary>
+	private static List<string> GetTopLevelAttributes( BlueprintElement element )
+	{
+		var childSet = new HashSet<string>();
+		foreach ( var kv in element.AttributeChildren )
+		{
+			foreach ( var child in kv.Value )
+				childSet.Add( child );
+		}
+
+		return element.Attributes.Keys
+			.Where( a => !childSet.Contains( a ) )
+			.ToList();
+	}
+
 	private void OnItemSelected( object item )
 	{
 		if ( item is BlueprintElement element )
 		{
 			_selectedElement = element;
+			_selectedAttrName = null;
 			_dock.SelectElement( element );
+		}
+		else if ( item is string attrName )
+		{
+			// Attribute selected — keep tracking for sorting
+			_selectedAttrName = attrName;
 		}
 	}
 
 	private void OnExternalSelection( BlueprintElement element )
 	{
 		_selectedElement = element;
+		_selectedAttrName = null;
 		if ( element != null )
 			_tree.SelectItem( element );
 	}
 
 	private void MoveSelected( int direction )
 	{
+		// Try moving an attribute first
+		if ( _selectedAttrName != null && _selectedElement != null )
+		{
+			MoveAttribute( _selectedElement, _selectedAttrName, direction );
+			return;
+		}
+
 		if ( _selectedElement == null ) return;
 
 		// Find which list the element is in (could be top-level or a child list)
@@ -140,6 +188,29 @@ public class ElementTreePanel : Widget
 			redo: () => { parentList.RemoveAt( idx ); parentList.Insert( newIdx, el ); _dock.MarkDirty(); }
 		);
 		_dock.MarkDirty();
+	}
+
+	/// <summary>
+	/// Reorders an attribute within its parent element's attribute dictionary.
+	/// </summary>
+	public static void MoveAttribute( BlueprintElement element, string attrName, int direction )
+	{
+		var keys = element.Attributes.Keys.ToList();
+		var idx = keys.IndexOf( attrName );
+		if ( idx < 0 ) return;
+
+		var newIdx = idx + direction;
+		if ( newIdx < 0 || newIdx >= keys.Count ) return;
+
+		// Rebuild dictionary in new order
+		keys.RemoveAt( idx );
+		keys.Insert( newIdx, attrName );
+
+		var newDict = new Dictionary<string, Dictionary<string, object>>();
+		foreach ( var key in keys )
+			newDict[key] = element.Attributes[key];
+
+		element.Attributes = newDict;
 	}
 
 	private List<BlueprintElement> FindParentList( BlueprintElement element )
@@ -287,7 +358,7 @@ public class ElementTreePanel : Widget
 }
 
 /// <summary>
-/// Custom TreeNode that shows element name, type icon, and context menu.
+/// Custom TreeNode that shows element name, type icon, eyeball visibility toggle, and context menu.
 /// </summary>
 public class BlueprintTreeNode : TreeNode<BlueprintElement>
 {
@@ -309,25 +380,37 @@ public class BlueprintTreeNode : TreeNode<BlueprintElement>
 		var label = string.IsNullOrEmpty( el.Name ) ? $"({el.ElementType})" : el.Name;
 		var typeTag = el.ElementType == ElementType.Property ? $"[{el.PropertyType}]" : $"[{el.ElementType}]";
 
+		// Dim hidden elements
+		var alpha = el.Hidden ? 0.35f : 1.0f;
+
 		// Icon
 		var iconRect = item.Rect;
 		iconRect.Width = 20;
 		iconRect.Left += 4;
-		Paint.SetPen( Theme.Blue );
+		Paint.SetPen( Theme.Blue.WithAlpha( alpha ) );
 		Paint.DrawIcon( iconRect, icon, 14, TextFlag.LeftCenter );
 
 		// Label
 		var textRect = item.Rect;
 		textRect.Left += 28;
-		textRect.Right -= 80;
-		Paint.SetPen( Theme.Text );
+		textRect.Right -= 100;
+		Paint.SetPen( Theme.Text.WithAlpha( alpha ) );
 		Paint.DrawText( textRect, label, TextFlag.LeftCenter );
 
-		// Type tag (dimmed, right-aligned)
+		// Type tag (dimmed, right-aligned before the eyeball)
 		var tagRect = item.Rect;
-		tagRect.Left = tagRect.Right - 76;
-		Paint.SetPen( Theme.Text.WithAlpha( 0.4f ) );
+		tagRect.Left = tagRect.Right - 96;
+		tagRect.Right -= 24;
+		Paint.SetPen( Theme.Text.WithAlpha( 0.4f * alpha ) );
 		Paint.DrawText( tagRect, typeTag, TextFlag.RightCenter );
+
+		// Eyeball visibility icon (right edge)
+		var eyeRect = item.Rect;
+		eyeRect.Left = eyeRect.Right - 22;
+		eyeRect.Width = 20;
+		var eyeIcon = el.Hidden ? "visibility_off" : "visibility";
+		Paint.SetPen( el.Hidden ? Theme.Text.WithAlpha( 0.3f ) : Theme.Text.WithAlpha( 0.6f ) );
+		Paint.DrawIcon( eyeRect, eyeIcon, 14, TextFlag.Center );
 	}
 
 	public override bool OnContextMenu()
@@ -336,6 +419,17 @@ public class BlueprintTreeNode : TreeNode<BlueprintElement>
 		if ( el == null ) return false;
 
 		var menu = new Menu();
+
+		// Visibility toggle
+		var hideLabel = el.Hidden ? "Show" : "Hide";
+		var hideIcon = el.Hidden ? "visibility" : "visibility_off";
+		menu.AddOption( hideLabel, hideIcon, () =>
+		{
+			el.Hidden = !el.Hidden;
+			_dock.MarkDirty();
+		} );
+
+		menu.AddSeparator();
 
 		menu.AddOption( "Duplicate", "content_copy", () =>
 		{
@@ -553,7 +647,7 @@ public class BlueprintTreeNode : TreeNode<BlueprintElement>
 		return false;
 	}
 
-	private static string GetElementIcon( BlueprintElement element )
+	internal static string GetElementIcon( BlueprintElement element )
 	{
 		return element.ElementType switch
 		{
@@ -595,13 +689,16 @@ public class BlueprintTreeNode : TreeNode<BlueprintElement>
 
 /// <summary>
 /// Tree node representing an attribute on an element.
-/// Displayed as a sub-item under its parent element node.
+/// Supports eyeball visibility toggle, sorting, nesting, and context menu.
 /// </summary>
 public class AttributeTreeNode : TreeNode<string>
 {
 	private readonly BlueprintElement _element;
 	private readonly string _attrName;
 	private readonly PluginBuilderDock _dock;
+
+	public BlueprintElement Element => _element;
+	public string AttrName => _attrName;
 
 	public AttributeTreeNode( BlueprintElement element, string attrName, PluginBuilderDock dock ) : base( attrName )
 	{
@@ -617,32 +714,168 @@ public class AttributeTreeNode : TreeNode<string>
 		var def = AttributeCatalog.Get( _attrName );
 		var icon = def?.Icon ?? "label";
 
+		// Check if this attribute is hidden via position
+		var isHidden = _element.AttributePositions.TryGetValue( _attrName, out var pos )
+			&& pos == AttributePosition.Hidden;
+		var alpha = isHidden ? 0.35f : 1.0f;
+
 		// Icon
 		var iconRect = item.Rect;
 		iconRect.Width = 20;
 		iconRect.Left += 4;
-		Paint.SetPen( Color.Parse( "#6ab4ff" ) ?? Theme.Blue );
+		var attrColor = Color.Parse( "#6ab4ff" ) ?? Theme.Blue;
+		Paint.SetPen( attrColor.WithAlpha( alpha ) );
 		Paint.DrawIcon( iconRect, icon, 12, TextFlag.LeftCenter );
 
 		// Label
 		var textRect = item.Rect;
 		textRect.Left += 28;
-		Paint.SetPen( Color.Parse( "#6ab4ff" ) ?? Theme.Blue );
+		textRect.Right -= 24;
+		Paint.SetPen( attrColor.WithAlpha( alpha ) );
 		Paint.DrawText( textRect, $"[{_attrName}]", TextFlag.LeftCenter );
+
+		// Eyeball visibility icon (right edge)
+		var eyeRect = item.Rect;
+		eyeRect.Left = eyeRect.Right - 22;
+		eyeRect.Width = 20;
+		var eyeIcon = isHidden ? "visibility_off" : "visibility";
+		Paint.SetPen( isHidden ? Theme.Text.WithAlpha( 0.3f ) : Theme.Text.WithAlpha( 0.6f ) );
+		Paint.DrawIcon( eyeRect, eyeIcon, 12, TextFlag.Center );
 	}
 
 	public override bool OnContextMenu()
 	{
 		var menu = new Menu();
 
+		// Visibility toggle
+		var isHidden = _element.AttributePositions.TryGetValue( _attrName, out var pos )
+			&& pos == AttributePosition.Hidden;
+		var hideLabel = isHidden ? "Show" : "Hide";
+		var hideIcon = isHidden ? "visibility" : "visibility_off";
+		menu.AddOption( hideLabel, hideIcon, () =>
+		{
+			if ( isHidden )
+				_element.AttributePositions[_attrName] = AttributePosition.Below;
+			else
+				_element.AttributePositions[_attrName] = AttributePosition.Hidden;
+			_dock.MarkDirty();
+		} );
+
+		menu.AddSeparator();
+
+		// Sort up/down
+		menu.AddOption( "Move Up", "arrow_upward", () =>
+		{
+			ElementTreePanel.MoveAttribute( _element, _attrName, -1 );
+			_dock.MarkDirty();
+		} );
+
+		menu.AddOption( "Move Down", "arrow_downward", () =>
+		{
+			ElementTreePanel.MoveAttribute( _element, _attrName, 1 );
+			_dock.MarkDirty();
+		} );
+
+		menu.AddSeparator();
+
+		// Nest / Unnest
+		var keys = _element.Attributes.Keys.ToList();
+		var idx = keys.IndexOf( _attrName );
+
+		// Check if this is a child of another attribute
+		string currentParent = null;
+		foreach ( var kv in _element.AttributeChildren )
+		{
+			if ( kv.Value.Contains( _attrName ) )
+			{
+				currentParent = kv.Key;
+				break;
+			}
+		}
+
+		if ( currentParent != null )
+		{
+			menu.AddOption( "Unnest (make top-level)", "subdirectory_arrow_left", () =>
+			{
+				_element.AttributeChildren[currentParent].Remove( _attrName );
+				if ( _element.AttributeChildren[currentParent].Count == 0 )
+					_element.AttributeChildren.Remove( currentParent );
+				_dock.MarkDirty();
+			} );
+		}
+		else if ( idx > 0 )
+		{
+			// Can nest under the attribute above it
+			var parentCandidate = keys[idx - 1];
+			menu.AddOption( $"Nest inside [{parentCandidate}]", "subdirectory_arrow_right", () =>
+			{
+				if ( !_element.AttributeChildren.ContainsKey( parentCandidate ) )
+					_element.AttributeChildren[parentCandidate] = new List<string>();
+				_element.AttributeChildren[parentCandidate].Add( _attrName );
+				_dock.MarkDirty();
+			} );
+		}
+
+		menu.AddSeparator();
+
 		menu.AddOption( "Remove", "delete", () =>
 		{
 			_element.Attributes.Remove( _attrName );
 			_element.AttributePositions.Remove( _attrName );
+			_element.AttributeChildren.Remove( _attrName );
+			// Also remove from any parent's child list
+			foreach ( var kv in _element.AttributeChildren.ToList() )
+			{
+				kv.Value.Remove( _attrName );
+				if ( kv.Value.Count == 0 )
+					_element.AttributeChildren.Remove( kv.Key );
+			}
 			_dock.MarkDirty();
 		} );
 
 		menu.OpenAtCursor();
 		return true;
+	}
+}
+
+/// <summary>
+/// Custom TreeView that intercepts mouse clicks in the eyeball icon area (last 24px)
+/// to toggle element/attribute visibility, since TreeNode doesn't expose OnClick.
+/// </summary>
+internal class VisibilityTreeView : TreeView
+{
+	private readonly PluginBuilderDock _dock;
+
+	public VisibilityTreeView( Widget parent, PluginBuilderDock dock ) : base( parent )
+	{
+		_dock = dock;
+	}
+
+	protected override void OnMousePress( MouseEvent e )
+	{
+		var item = GetItemAt( e.LocalPosition );
+		if ( item != null && e.LocalPosition.x >= item.Rect.Right - 24 )
+		{
+			if ( item.Object is BlueprintTreeNode btn )
+			{
+				var el = btn.Value;
+				if ( el != null )
+				{
+					el.Hidden = !el.Hidden;
+					_dock.MarkDirty();
+					return;
+				}
+			}
+			else if ( item.Object is AttributeTreeNode atn )
+			{
+				var isHidden = atn.Element.AttributePositions.TryGetValue( atn.AttrName, out var p )
+					&& p == AttributePosition.Hidden;
+				atn.Element.AttributePositions[atn.AttrName] = isHidden ? AttributePosition.Below : AttributePosition.Hidden;
+				_dock.MarkDirty();
+				return;
+			}
+		}
+
+		base.OnMousePress( e );
 	}
 }

@@ -676,12 +676,29 @@ public class PreviewRenderer
 		spacer.MouseClick = () => _dock.SelectElement( element );
 		spacer.MouseRightClick = () => ShowElementContextMenu( spacer, element );
 
-		float height = 8f;
-		if ( element.Attributes.TryGetValue( "Space", out var spaceParams ) )
-			height = GetFloat( spaceParams, "height", 8f );
+		float size = element.SpacerSize;
+		if ( size <= 0 )
+		{
+			// Fallback to attribute-based height for backward compat
+			if ( element.Attributes.TryGetValue( "Space", out var spaceParams ) )
+				size = GetFloat( spaceParams, "height", 8f );
+			else
+				size = 8f;
+		}
 
-		spacer.MinimumHeight = height;
-		spacer.MaximumHeight = height;
+		if ( element.SpacerDirection == SpacerDirection.Horizontal )
+		{
+			spacer.MinimumWidth = size;
+			spacer.MaximumWidth = size;
+			spacer.MinimumHeight = 4;
+			spacer.MaximumHeight = 4;
+		}
+		else
+		{
+			spacer.MinimumHeight = size;
+			spacer.MaximumHeight = size;
+		}
+
 		spacer.SetStyles( "background-color: rgba(255,255,255,0.02);" );
 		return spacer;
 	}

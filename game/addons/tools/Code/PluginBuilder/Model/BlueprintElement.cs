@@ -42,6 +42,27 @@ public class BlueprintElement
 	/// </summary>
 	public Dictionary<string, AttributePosition> AttributePositions { get; set; } = new();
 
+	/// <summary>
+	/// Whether this element is hidden in the preview (eyeball toggle).
+	/// </summary>
+	public bool Hidden { get; set; }
+
+	/// <summary>
+	/// For Space elements: direction of the spacer.
+	/// </summary>
+	public SpacerDirection SpacerDirection { get; set; } = SpacerDirection.Vertical;
+
+	/// <summary>
+	/// For Space elements: amount of space in pixels.
+	/// </summary>
+	public float SpacerSize { get; set; } = 8f;
+
+	/// <summary>
+	/// Nested attribute hierarchy. Maps parent attribute name → ordered list of child attribute names.
+	/// Child attributes render within the parent attribute's visual area.
+	/// </summary>
+	public Dictionary<string, List<string>> AttributeChildren { get; set; } = new();
+
 	public BlueprintElement Clone()
 	{
 		var json = JsonSerializer.Serialize( this, BlueprintSerializer.Options );
@@ -89,5 +110,12 @@ public enum AttributePosition
 	Above,
 	Below,
 	Left,
-	Right
+	Right,
+	Hidden
+}
+
+public enum SpacerDirection
+{
+	Vertical,
+	Horizontal
 }
