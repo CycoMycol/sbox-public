@@ -90,6 +90,13 @@ public class ElementTreePanel : Widget
 		else
 			parent.AddItem( node );
 
+		// Add attribute sub-nodes
+		foreach ( var attr in element.Attributes )
+		{
+			var attrNode = new AttributeTreeNode( element, attr.Key, _dock );
+			node.AddItem( attrNode );
+		}
+
 		foreach ( var child in element.Children )
 		{
 			AddTreeNode( node, child );
@@ -583,5 +590,59 @@ public class BlueprintTreeNode : TreeNode<BlueprintElement>
 			PropertyType.CustomStruct => "data_object",
 			_ => "circle"
 		};
+	}
+}
+
+/// <summary>
+/// Tree node representing an attribute on an element.
+/// Displayed as a sub-item under its parent element node.
+/// </summary>
+public class AttributeTreeNode : TreeNode<string>
+{
+	private readonly BlueprintElement _element;
+	private readonly string _attrName;
+	private readonly PluginBuilderDock _dock;
+
+	public AttributeTreeNode( BlueprintElement element, string attrName, PluginBuilderDock dock ) : base( attrName )
+	{
+		_element = element;
+		_attrName = attrName;
+		_dock = dock;
+	}
+
+	public override void OnPaint( VirtualWidget item )
+	{
+		PaintSelection( item );
+
+		var def = AttributeCatalog.Get( _attrName );
+		var icon = def?.Icon ?? "label";
+
+		// Icon
+		var iconRect = item.Rect;
+		iconRect.Width = 20;
+		iconRect.Left += 4;
+		Paint.SetPen( Color.Parse( "#6ab4ff" ) ?? Theme.Blue );
+		Paint.DrawIcon( iconRect, icon, 12, TextFlag.LeftCenter );
+
+		// Label
+		var textRect = item.Rect;
+		textRect.Left += 28;
+		Paint.SetPen( Color.Parse( "#6ab4ff" ) ?? Theme.Blue );
+		Paint.DrawText( textRect, $"[{_attrName}]", TextFlag.LeftCenter );
+	}
+
+	public override bool OnContextMenu()
+	{
+		var menu = new Menu();
+
+		menu.AddOption( "Remove", "delete", () =>
+		{
+			_element.Attributes.Remove( _attrName );
+			_element.AttributePositions.Remove( _attrName );
+			_dock.MarkDirty();
+		} );
+
+		menu.OpenAtCursor();
+		return true;
 	}
 }

@@ -3,223 +3,188 @@ using Sandbox.UI;
 namespace Editor.PluginBuilder;
 
 /// <summary>
-/// Floating toolbar that appears above the selected element in the preview panel.
-/// Provides quick-access buttons: Add Element, Add Attribute, Delete, Duplicate,
-/// and attribute position controls (Left, Right, Above, Below).
+/// Single floating toolbar that appears inline in the preview, directly above
+/// the selected element. Shows actions for the selected element or attribute.
+/// Inserted into the preview layout flow — not absolutely positioned.
 /// </summary>
 public class FloatingToolbar : Widget
 {
 	private readonly PluginBuilderDock _dock;
 	private BlueprintElement _element;
+	private string _selectedAttrName;
+	private bool _toolbarEnabled = true;
 
-	private Widget _positionRow;
-	private Button _btnAbove;
-	private Button _btnBelow;
-	private Button _btnLeft;
-	private Button _btnRight;
+	public bool ToolbarEnabled
+	{
+		get => _toolbarEnabled;
+		set
+		{
+			_toolbarEnabled = value;
+			UpdateVisibility();
+		}
+	}
+
+	public BlueprintElement Element => _element;
+	public string SelectedAttributeName => _selectedAttrName;
 
 	public FloatingToolbar( Widget parent, PluginBuilderDock dock ) : base( parent )
 	{
 		_dock = dock;
 		Visible = false;
 
-		Layout = Layout.Column();
+		Layout = Layout.Row();
 		Layout.Spacing = 2;
 
-		SetStyles( "background-color: rgba(30,30,30,0.95); border: 1px solid rgba(100,180,255,0.4); border-radius: 6px; padding: 4px 6px;" );
-
-		BuildToolbar();
-	}
-
-	private void BuildToolbar()
-	{
-		// Main action row
-		var actionRow = new Widget( this );
-		actionRow.Layout = Layout.Row();
-		actionRow.Layout.Spacing = 2;
-
-		// Add Element dropdown
-		var addElemBtn = new Button( "", "add_circle", actionRow );
-		addElemBtn.ToolTip = "Add Element";
-		addElemBtn.SetStyles( "padding: 2px 4px;" );
-		addElemBtn.Clicked = () => ShowAddElementMenu( addElemBtn );
-		actionRow.Layout.Add( addElemBtn );
-
-		// Add Attribute dropdown
-		var addAttrBtn = new Button( "", "label", actionRow );
-		addAttrBtn.ToolTip = "Add Attribute";
-		addAttrBtn.SetStyles( "padding: 2px 4px;" );
-		addAttrBtn.Clicked = () => ShowAddAttributeMenu( addAttrBtn );
-		actionRow.Layout.Add( addAttrBtn );
-
-		// Separator
-		var sep1 = new Widget( actionRow );
-		sep1.MinimumWidth = 1;
-		sep1.MaximumWidth = 1;
-		sep1.SetStyles( "background-color: rgba(255,255,255,0.15);" );
-		actionRow.Layout.Add( sep1 );
-
-		// Duplicate
-		var dupeBtn = new Button( "", "content_copy", actionRow );
-		dupeBtn.ToolTip = "Duplicate";
-		dupeBtn.SetStyles( "padding: 2px 4px;" );
-		dupeBtn.Clicked = () => DuplicateElement();
-		actionRow.Layout.Add( dupeBtn );
-
-		// Delete
-		var delBtn = new Button( "", "delete", actionRow );
-		delBtn.ToolTip = "Remove Element";
-		delBtn.SetStyles( "padding: 2px 4px; color: #ff6b6b;" );
-		delBtn.Clicked = () => RemoveElement();
-		actionRow.Layout.Add( delBtn );
-
-		// Separator
-		var sep2 = new Widget( actionRow );
-		sep2.MinimumWidth = 1;
-		sep2.MaximumWidth = 1;
-		sep2.SetStyles( "background-color: rgba(255,255,255,0.15);" );
-		actionRow.Layout.Add( sep2 );
-
-		// Attribute position buttons
-		_btnLeft = new Button( "", "arrow_back", actionRow );
-		_btnLeft.ToolTip = "Attributes: Left";
-		_btnLeft.SetStyles( "padding: 2px 3px;" );
-		_btnLeft.Clicked = () => SetAttributePosition( AttributePosition.Left );
-		actionRow.Layout.Add( _btnLeft );
-
-		_btnAbove = new Button( "", "arrow_upward", actionRow );
-		_btnAbove.ToolTip = "Attributes: Above";
-		_btnAbove.SetStyles( "padding: 2px 3px;" );
-		_btnAbove.Clicked = () => SetAttributePosition( AttributePosition.Above );
-		actionRow.Layout.Add( _btnAbove );
-
-		_btnBelow = new Button( "", "arrow_downward", actionRow );
-		_btnBelow.ToolTip = "Attributes: Below";
-		_btnBelow.SetStyles( "padding: 2px 3px;" );
-		_btnBelow.Clicked = () => SetAttributePosition( AttributePosition.Below );
-		actionRow.Layout.Add( _btnBelow );
-
-		_btnRight = new Button( "", "arrow_forward", actionRow );
-		_btnRight.ToolTip = "Attributes: Right";
-		_btnRight.SetStyles( "padding: 2px 3px;" );
-		_btnRight.Clicked = () => SetAttributePosition( AttributePosition.Right );
-		actionRow.Layout.Add( _btnRight );
-
-		Layout.Add( actionRow );
-
-		// Attribute list row — shows current attributes with individual position controls
-		_positionRow = new Widget( this );
-		_positionRow.Layout = Layout.Column();
-		_positionRow.Layout.Spacing = 1;
-		Layout.Add( _positionRow );
+		SetStyles( "background-color: rgba(30,30,30,0.95); border: 1px solid rgba(100,180,255,0.4); border-radius: 4px; padding: 2px 4px;" );
 	}
 
 	public void ShowForElement( BlueprintElement element )
 	{
 		_element = element;
-		Visible = element != null;
-		RebuildAttributeList();
+		_selectedAttrName = null;
+		Rebuild();
+	}
+
+	public void ShowForAttribute( BlueprintElement element, string attrName )
+	{
+		_element = element;
+		_selectedAttrName = attrName;
+		Rebuild();
 	}
 
 	public void Hide()
 	{
 		_element = null;
+		_selectedAttrName = null;
 		Visible = false;
 	}
 
-	private void RebuildAttributeList()
+	private void UpdateVisibility()
 	{
-		_positionRow.Layout.Clear( true );
+		Visible = _toolbarEnabled && _element != null;
+	}
 
-		if ( _element == null || _element.Attributes.Count == 0 )
-			return;
+	private void Rebuild()
+	{
+		Layout.Clear( true );
+		UpdateVisibility();
+		if ( !Visible ) return;
 
-		foreach ( var attr in _element.Attributes )
+		if ( _selectedAttrName != null )
+			BuildAttributeToolbar();
+		else
+			BuildElementToolbar();
+	}
+
+	private void BuildElementToolbar()
+	{
+		// Add Element
+		var addElemBtn = new Button( "", "add_circle", this );
+		addElemBtn.ToolTip = "Add Element";
+		addElemBtn.SetStyles( "padding: 2px 4px;" );
+		addElemBtn.Clicked = () => ShowAddElementMenu( addElemBtn );
+		Layout.Add( addElemBtn );
+
+		// Add Attribute
+		var addAttrBtn = new Button( "", "label", this );
+		addAttrBtn.ToolTip = "Add Attribute";
+		addAttrBtn.SetStyles( "padding: 2px 4px;" );
+		addAttrBtn.Clicked = () => ShowAddAttributeMenu( addAttrBtn );
+		Layout.Add( addAttrBtn );
+
+		AddSep();
+
+		// Duplicate
+		var dupeBtn = new Button( "", "content_copy", this );
+		dupeBtn.ToolTip = "Duplicate";
+		dupeBtn.SetStyles( "padding: 2px 4px;" );
+		dupeBtn.Clicked = () => DuplicateElement();
+		Layout.Add( dupeBtn );
+
+		// Delete
+		var delBtn = new Button( "", "delete", this );
+		delBtn.ToolTip = "Remove Element";
+		delBtn.SetStyles( "padding: 2px 4px; color: #ff6b6b;" );
+		delBtn.Clicked = () => RemoveElement();
+		Layout.Add( delBtn );
+	}
+
+	private void BuildAttributeToolbar()
+	{
+		// Back to element
+		var backBtn = new Button( "", "arrow_back", this );
+		backBtn.ToolTip = "Back to Element";
+		backBtn.SetStyles( "padding: 2px 4px;" );
+		backBtn.Clicked = () =>
 		{
-			var row = new Widget( _positionRow );
-			row.Layout = Layout.Row();
-			row.Layout.Spacing = 2;
+			_selectedAttrName = null;
+			_dock.SelectElement( _element );
+			Rebuild();
+		};
+		Layout.Add( backBtn );
 
-			var tag = new Label( $"[{attr.Key}]", row );
-			tag.SetStyles( "color: rgba(100,180,255,0.8); font-size: 10px; padding: 1px 3px;" );
-			row.Layout.Add( tag );
+		var attrLabel = new Label( $"[{_selectedAttrName}]", this );
+		attrLabel.SetStyles( "color: #6ab4ff; font-weight: bold; font-size: 11px; padding: 0 4px;" );
+		Layout.Add( attrLabel );
 
-			row.Layout.AddStretchCell( 1 );
+		AddSep();
 
-			var currentPos = AttributePosition.Above;
-			if ( _element.AttributePositions.TryGetValue( attr.Key, out var pos ) )
-				currentPos = pos;
+		// Position buttons
+		var currentPos = AttributePosition.Above;
+		if ( _element.AttributePositions.TryGetValue( _selectedAttrName, out var pos ) )
+			currentPos = pos;
 
-			var attrName = attr.Key;
+		var posButtons = new (string icon, string tip, AttributePosition pos)[]
+		{
+			("arrow_back", "Position: Left", AttributePosition.Left),
+			("arrow_upward", "Position: Above", AttributePosition.Above),
+			("arrow_downward", "Position: Below", AttributePosition.Below),
+			("arrow_forward", "Position: Right", AttributePosition.Right)
+		};
 
-			var lBtn = new Button( "", "arrow_back", row );
-			lBtn.SetStyles( GetPositionBtnStyle( currentPos == AttributePosition.Left ) );
-			lBtn.ToolTip = "Left";
-			lBtn.Clicked = () => SetSingleAttributePosition( attrName, AttributePosition.Left );
-			row.Layout.Add( lBtn );
-
-			var aBtn = new Button( "", "arrow_upward", row );
-			aBtn.SetStyles( GetPositionBtnStyle( currentPos == AttributePosition.Above ) );
-			aBtn.ToolTip = "Above";
-			aBtn.Clicked = () => SetSingleAttributePosition( attrName, AttributePosition.Above );
-			row.Layout.Add( aBtn );
-
-			var bBtn = new Button( "", "arrow_downward", row );
-			bBtn.SetStyles( GetPositionBtnStyle( currentPos == AttributePosition.Below ) );
-			bBtn.ToolTip = "Below";
-			bBtn.Clicked = () => SetSingleAttributePosition( attrName, AttributePosition.Below );
-			row.Layout.Add( bBtn );
-
-			var rBtn = new Button( "", "arrow_forward", row );
-			rBtn.SetStyles( GetPositionBtnStyle( currentPos == AttributePosition.Right ) );
-			rBtn.ToolTip = "Right";
-			rBtn.Clicked = () => SetSingleAttributePosition( attrName, AttributePosition.Right );
-			row.Layout.Add( rBtn );
-
-			var removeBtn = new Button( "", "close", row );
-			removeBtn.SetStyles( "padding: 1px 2px; color: #ff6b6b; font-size: 10px;" );
-			removeBtn.ToolTip = $"Remove [{attrName}]";
-			removeBtn.Clicked = () =>
+		var attrName = _selectedAttrName;
+		foreach ( var (icon, tip, p) in posButtons )
+		{
+			var btn = new Button( "", icon, this );
+			btn.ToolTip = tip;
+			btn.SetStyles( currentPos == p
+				? "padding: 2px 3px; background-color: rgba(100,180,255,0.3); border-radius: 3px;"
+				: "padding: 2px 3px;" );
+			btn.Clicked = () =>
 			{
-				_element.Attributes.Remove( attrName );
-				_element.AttributePositions.Remove( attrName );
+				_element.AttributePositions[attrName] = p;
 				_dock.MarkDirty();
-				RebuildAttributeList();
+				Rebuild();
 			};
-			row.Layout.Add( removeBtn );
-
-			_positionRow.Layout.Add( row );
+			Layout.Add( btn );
 		}
-	}
 
-	private static string GetPositionBtnStyle( bool active )
-	{
-		return active
-			? "padding: 1px 2px; background-color: rgba(100,180,255,0.3); border-radius: 3px;"
-			: "padding: 1px 2px;";
-	}
+		AddSep();
 
-	private void SetAttributePosition( AttributePosition position )
-	{
-		if ( _element == null ) return;
-
-		// Set all current attributes to this position
-		foreach ( var attr in _element.Attributes )
+		// Remove attribute
+		var removeBtn = new Button( "", "delete", this );
+		removeBtn.ToolTip = $"Remove [{_selectedAttrName}]";
+		removeBtn.SetStyles( "padding: 2px 4px; color: #ff6b6b;" );
+		var capturedName = _selectedAttrName;
+		removeBtn.Clicked = () =>
 		{
-			_element.AttributePositions[attr.Key] = position;
-		}
-
-		_dock.MarkDirty();
-		RebuildAttributeList();
+			_element.Attributes.Remove( capturedName );
+			_element.AttributePositions.Remove( capturedName );
+			_selectedAttrName = null;
+			_dock.MarkDirty();
+			Rebuild();
+		};
+		Layout.Add( removeBtn );
 	}
 
-	private void SetSingleAttributePosition( string attrName, AttributePosition position )
+	private void AddSep()
 	{
-		if ( _element == null ) return;
-
-		_element.AttributePositions[attrName] = position;
-		_dock.MarkDirty();
-		RebuildAttributeList();
+		var sep = new Widget( this );
+		sep.MinimumWidth = 1;
+		sep.MaximumWidth = 1;
+		sep.MinimumHeight = 16;
+		sep.SetStyles( "background-color: rgba(255,255,255,0.15);" );
+		Layout.Add( sep );
 	}
 
 	private void ShowAddElementMenu( Widget anchor )
@@ -255,7 +220,6 @@ public class FloatingToolbar : Widget
 				_element.Attributes[attr.Name] = new Dictionary<string, object>();
 				_element.AttributePositions[attr.Name] = AttributePosition.Above;
 				_dock.MarkDirty();
-				RebuildAttributeList();
 			} );
 		}
 
@@ -305,6 +269,7 @@ public class FloatingToolbar : Widget
 			redo: () => { list.Remove( element ); _dock.MarkDirty(); }
 		);
 
+		Hide();
 		_dock.MarkDirty();
 	}
 

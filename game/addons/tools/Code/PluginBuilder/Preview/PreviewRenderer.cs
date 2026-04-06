@@ -137,7 +137,7 @@ public class PreviewRenderer
 		bool wideMode = element.Attributes.ContainsKey( "WideMode" );
 
 		// Build core property content (label + value)
-		var coreContent = new Widget( null );
+		var coreContent = new Widget( outer );
 
 		if ( wideMode )
 		{
@@ -182,8 +182,8 @@ public class PreviewRenderer
 				coreContent.Layout.Add( valueWidget, 1 );
 		}
 
-		// Position attribute tags around the property content
-		RenderPositionedContent( outer, coreContent, element );
+		// Add core content to outer
+		outer.Layout.Add( coreContent );
 
 		return outer;
 	}
@@ -196,140 +196,6 @@ public class PreviewRenderer
 
 		var iconBtn = new Button( "", iconName, row );
 		row.Layout.Add( iconBtn );
-	}
-
-	private void RenderPositionedContent( Widget outer, Widget coreContent, BlueprintElement element )
-	{
-		// Collect non-visual attribute tags grouped by position
-		var visualAttrs = new HashSet<string>
-		{
-			"TextArea", "Placeholder", "Range", "MinMax", "EnumButtonGroup", "BitFlags",
-			"ReadOnly", "Hide", "WideMode", "Title", "Icon", "Header", "Space", "InfoBox",
-			"FontName", "InputAction", "ImageAssetPath", "IconName",
-			"AssetPath", "FilePath", "ResourceType", "ColorUsage", "Tint", "Button"
-		};
-
-		var tagAttrs = element.Attributes
-			.Where( a => !visualAttrs.Contains( a.Key ) )
-			.ToList();
-
-		if ( tagAttrs.Count == 0 )
-		{
-			// No tags — just add core content directly
-			outer.Layout.Add( coreContent );
-			return;
-		}
-
-		var grouped = new Dictionary<AttributePosition, List<KeyValuePair<string, Dictionary<string, object>>>>
-		{
-			[AttributePosition.Above] = new(),
-			[AttributePosition.Below] = new(),
-			[AttributePosition.Left] = new(),
-			[AttributePosition.Right] = new()
-		};
-
-		foreach ( var attr in tagAttrs )
-		{
-			var pos = AttributePosition.Above;
-			if ( element.AttributePositions.TryGetValue( attr.Key, out var p ) )
-				pos = p;
-			grouped[pos].Add( attr );
-		}
-
-		// Above tags
-		if ( grouped[AttributePosition.Above].Count > 0 )
-			outer.Layout.Add( BuildTagRow( outer, grouped[AttributePosition.Above], element ) );
-
-		// Middle row: optional left | content | optional right
-		bool hasLeft = grouped[AttributePosition.Left].Count > 0;
-		bool hasRight = grouped[AttributePosition.Right].Count > 0;
-
-		if ( hasLeft || hasRight )
-		{
-			var middleRow = new Widget( outer );
-			middleRow.Layout = Layout.Row();
-			middleRow.Layout.Spacing = 4;
-
-			if ( hasLeft )
-				middleRow.Layout.Add( BuildTagColumn( middleRow, grouped[AttributePosition.Left], element ) );
-
-			middleRow.Layout.Add( coreContent, 1 );
-
-			if ( hasRight )
-				middleRow.Layout.Add( BuildTagColumn( middleRow, grouped[AttributePosition.Right], element ) );
-
-			outer.Layout.Add( middleRow );
-		}
-		else
-		{
-			outer.Layout.Add( coreContent );
-		}
-
-		// Below tags
-		if ( grouped[AttributePosition.Below].Count > 0 )
-			outer.Layout.Add( BuildTagRow( outer, grouped[AttributePosition.Below], element ) );
-	}
-
-	private Widget BuildTagRow( Widget parent, List<KeyValuePair<string, Dictionary<string, object>>> tags, BlueprintElement element )
-	{
-		var row = new Widget( parent );
-		row.Layout = Layout.Row();
-		row.Layout.Spacing = 4;
-		row.Layout.Margin = new Margin( 4, 1, 4, 1 );
-
-		foreach ( var attr in tags )
-		{
-			var tagText = FormatTagText( attr.Key, attr.Value );
-			var tag = new Label( tagText, row );
-			tag.SetStyles( "color: rgba(100,180,255,0.7); font-size: 10px; background-color: rgba(100,180,255,0.1); border-radius: 2px; padding: 1px 4px;" );
-			row.Layout.Add( tag );
-		}
-
-		return row;
-	}
-
-	private Widget BuildTagColumn( Widget parent, List<KeyValuePair<string, Dictionary<string, object>>> tags, BlueprintElement element )
-	{
-		var col = new Widget( parent );
-		col.Layout = Layout.Column();
-		col.Layout.Spacing = 2;
-		col.Layout.Margin = new Margin( 2, 0, 2, 0 );
-
-		foreach ( var attr in tags )
-		{
-			var tagText = FormatTagText( attr.Key, attr.Value );
-			var tag = new Label( tagText, col );
-			tag.SetStyles( "color: rgba(100,180,255,0.7); font-size: 10px; background-color: rgba(100,180,255,0.1); border-radius: 2px; padding: 1px 4px;" );
-			col.Layout.Add( tag );
-		}
-
-		return col;
-	}
-
-	private string FormatTagText( string key, Dictionary<string, object> value )
-	{
-		if ( key == "ShowIf" || key == "HideIf" )
-		{
-			var prop = GetString( value, "property", "" );
-			return !string.IsNullOrEmpty( prop ) ? $"[{key}: {prop}]" : $"[{key}]";
-		}
-		if ( key == "Group" || key == "Feature" || key == "ToggleGroup" )
-		{
-			var name = GetString( value, "name", "" );
-			return !string.IsNullOrEmpty( name ) ? $"[{key}: {name}]" : $"[{key}]";
-		}
-		if ( key == "Change" )
-		{
-			var cb = GetString( value, "callback", "" );
-			return !string.IsNullOrEmpty( cb ) ? $"[Change: {cb}]" : "[Change]";
-		}
-		if ( key == "Sync" ) return "[Sync]";
-		if ( key == "RequireComponent" )
-		{
-			var type = GetString( value, "type", "" );
-			return !string.IsNullOrEmpty( type ) ? $"[Requires: {type}]" : "[RequireComponent]";
-		}
-		return $"[{key}]";
 	}
 
 	// ──────────────────────── Value Widgets ────────────────────────

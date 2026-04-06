@@ -4,7 +4,8 @@ namespace Editor.PluginBuilder;
 
 /// <summary>
 /// Interactive live preview of the designed inspector.
-/// Built from manual widget construction (NOT ControlSheet).
+/// The floating toolbar is inserted inline directly above the selected element.
+/// Attributes render as visible, clickable tags in the preview.
 /// </summary>
 public class BlueprintPreviewPanel : Widget
 {
@@ -14,6 +15,8 @@ public class BlueprintPreviewPanel : Widget
 	private readonly Dictionary<string, Widget> _elementWidgets = new();
 	private string _selectedId;
 	private FloatingToolbar _toolbar;
+	private Button _toolbarToggleBtn;
+	private bool _toolbarVisible = true;
 
 	public BlueprintPreviewPanel( Widget parent, PluginBuilderDock dock ) : base( parent )
 	{
@@ -24,7 +27,7 @@ public class BlueprintPreviewPanel : Widget
 		Layout.Spacing = 4;
 		Layout.Margin = 8;
 
-		// Header
+		// Header row
 		var header = Layout.Add( new Widget( this ) );
 		header.Layout = Layout.Row();
 		header.Layout.Spacing = 4;
@@ -34,6 +37,22 @@ public class BlueprintPreviewPanel : Widget
 		header.Layout.Add( title );
 		header.Layout.AddStretchCell( 1 );
 
+		// Toolbar toggle button
+		_toolbarToggleBtn = new Button( "", "build", header );
+		_toolbarToggleBtn.ToolTip = "Toggle floating toolbar";
+		_toolbarToggleBtn.SetStyles( "padding: 2px 4px;" );
+		_toolbarToggleBtn.Clicked = () =>
+		{
+			if ( _toolbar != null )
+			{
+				_toolbarVisible = !_toolbarVisible;
+				_toolbar.ToolbarEnabled = _toolbarVisible;
+				UpdateToggleButtonStyle();
+				RebuildPreview();
+			}
+		};
+		header.Layout.Add( _toolbarToggleBtn );
+
 		// Preview scroll area
 		var scroll = new ScrollArea( this );
 		scroll.Canvas = new Widget( scroll );
@@ -41,8 +60,8 @@ public class BlueprintPreviewPanel : Widget
 		_previewContainer = scroll.Canvas;
 		Layout.Add( scroll, 1 );
 
-		// Floating toolbar — overlays the preview, positioned per-element
-		_toolbar = new FloatingToolbar( this, dock );
+		// Create the floating toolbar (will be inserted inline during rebuild)
+		_toolbar = new FloatingToolbar( _previewContainer, dock );
 
 		_dock.OnBlueprintChanged += RebuildPreview;
 		_dock.OnElementSelected += OnElementSelected;
@@ -57,27 +76,22 @@ public class BlueprintPreviewPanel : Widget
 		base.OnDestroyed();
 	}
 
+	private void UpdateToggleButtonStyle()
+	{
+		if ( _toolbarVisible )
+			_toolbarToggleBtn.SetStyles( "padding: 2px 4px; background-color: rgba(100,180,255,0.2); border-radius: 3px;" );
+		else
+			_toolbarToggleBtn.SetStyles( "padding: 2px 4px;" );
+	}
+
 	private void OnElementSelected( BlueprintElement element )
 	{
 		var newId = element?.Id;
 		if ( newId == _selectedId ) return;
-
-		// Remove old highlight
-		if ( _selectedId != null && _elementWidgets.TryGetValue( _selectedId, out var oldWidget ) )
-		{
-			oldWidget.SetStyles( "" );
-		}
-
 		_selectedId = newId;
 
-		// Apply new highlight — left and right edge bars only
-		if ( _selectedId != null && _elementWidgets.TryGetValue( _selectedId, out var newWidget ) )
-		{
-			newWidget.SetStyles( "border-left: 3px solid rgba(100,180,255,0.8); border-right: 3px solid rgba(100,180,255,0.8);" );
-		}
-
-		// Show / hide floating toolbar
-		_toolbar.ShowForElement( element );
+		// Rebuild to reposition toolbar inline above the newly selected element
+		RebuildPreview();
 	}
 
 	public void RebuildPreview()
@@ -85,6 +99,11 @@ public class BlueprintPreviewPanel : Widget
 		_previewContainer.Layout.Clear( true );
 		_elementWidgets.Clear();
 		_renderer.ClearTracking();
+
+		// Recreate toolbar fresh each rebuild so it can be placed inline
+		_toolbar = new FloatingToolbar( _previewContainer, _dock );
+		_toolbar.ToolbarEnabled = _toolbarVisible;
+		UpdateToggleButtonStyle();
 
 		var blueprint = _dock.ActiveBlueprint;
 		if ( blueprint == null )
@@ -114,23 +133,31 @@ public class BlueprintPreviewPanel : Widget
 
 		_previewContainer.Layout.Add( componentHeader );
 
-		// Render elements
-		RenderElements( _previewContainer, blueprint.Elements );
+		// Find selected element to determine toolbar placement
+		BlueprintElement selectedElement = null;
+		if ( _selectedId != null )
+			selectedElement = FindElementById( blueprint.Elements, _selectedId );
+
+		// Render elements with inline toolbar above the selected one
+		RenderElements( _previewContainer, blueprint.Elements, selectedElement );
 
 		_previewContainer.Layout.AddStretchCell( 1 );
 
-		// Re-apply highlight if an element is selected
+		// Highlight the selected element
 		if ( _selectedId != null && _elementWidgets.TryGetValue( _selectedId, out var selWidget ) )
 		{
 			selWidget.SetStyles( "border-left: 3px solid rgba(100,180,255,0.8); border-right: 3px solid rgba(100,180,255,0.8);" );
 		}
 
-		// Refresh the floating toolbar's attribute list (attributes may have changed)
-		if ( _selectedId != null )
+		// If toolbar wasn't placed (element not visible at top level), show it for the element anyway
+		if ( selectedElement != null )
 		{
-			// Find the element from the blueprint to refresh toolbar state
-			var selElement = FindElementById( _dock.ActiveBlueprint?.Elements, _selectedId );
-			_toolbar.ShowForElement( selElement );
+			if ( _toolbar.Element == null )
+				_toolbar.ShowForElement( selectedElement );
+		}
+		else
+		{
+			_toolbar.Hide();
 		}
 	}
 
@@ -146,36 +173,80 @@ public class BlueprintPreviewPanel : Widget
 		return null;
 	}
 
-	private void RenderElements( Widget container, List<BlueprintElement> elements )
+	private void RenderElements( Widget container, List<BlueprintElement> elements, BlueprintElement selectedElement )
 	{
 		foreach ( var element in elements )
 		{
+			// Insert toolbar above the selected element
+			if ( element == selectedElement )
+			{
+				_toolbar.ShowForElement( element );
+				container.Layout.Add( _toolbar );
+			}
+
 			var widget = _renderer.RenderElement( container, element );
 			if ( widget != null )
 			{
 				container.Layout.Add( widget );
 				_elementWidgets[element.Id] = widget;
 
-				// Recursively track child widgets if group/toggle/feature rendered children
-				TrackChildWidgets( element );
+				// Render attributes as visible clickable tags below the element
+				RenderAttributeWidgets( container, element );
+
+				// Recursively track child widgets
+				TrackChildWidgets( element, selectedElement );
 			}
 		}
 	}
 
-	private void TrackChildWidgets( BlueprintElement parent )
+	private void RenderAttributeWidgets( Widget container, BlueprintElement element )
+	{
+		if ( element.Attributes.Count == 0 ) return;
+
+		var attrRow = new Widget( container );
+		attrRow.Layout = Layout.Row();
+		attrRow.Layout.Spacing = 4;
+		attrRow.Layout.Margin = new Margin( 24, 0, 4, 2 );
+
+		foreach ( var attr in element.Attributes )
+		{
+			var attrName = attr.Key;
+			var def = AttributeCatalog.Get( attrName );
+			var icon = def?.Icon ?? "label";
+
+			var tag = new Button( $"[{attrName}]", icon, attrRow );
+			tag.SetStyles( "color: #6ab4ff; font-size: 10px; background-color: rgba(100,180,255,0.12); border-radius: 3px; padding: 2px 6px; border: 1px solid rgba(100,180,255,0.2);" );
+			tag.ToolTip = def?.Description ?? attrName;
+			tag.Cursor = CursorShape.Finger;
+
+			// Clicking an attribute shows the attribute toolbar
+			tag.Clicked = () =>
+			{
+				_selectedId = element.Id;
+				_toolbar.ShowForAttribute( element, attrName );
+
+				// Highlight the parent element
+				foreach ( var kv in _elementWidgets )
+					kv.Value.SetStyles( "" );
+				if ( _elementWidgets.TryGetValue( element.Id, out var elWidget ) )
+					elWidget.SetStyles( "border-left: 3px solid rgba(100,180,255,0.8); border-right: 3px solid rgba(100,180,255,0.8);" );
+			};
+
+			attrRow.Layout.Add( tag );
+		}
+
+		container.Layout.Add( attrRow );
+	}
+
+	private void TrackChildWidgets( BlueprintElement parent, BlueprintElement selectedElement )
 	{
 		foreach ( var child in parent.Children )
 		{
-			// The child widget was already rendered by the renderer's group/toggle/feature methods.
-			// We need to find and track them — the renderer stores them via the MouseClick/ContextMenu
-			// event wiring, but we can't easily reach them. Instead, rely on the renderer to
-			// register child widgets through the callback we provide.
-			// For now, child elements rendered inside groups are tracked via _renderer.ElementWidgets.
 			if ( _renderer.ElementWidgets.TryGetValue( child.Id, out var childWidget ) )
 			{
 				_elementWidgets[child.Id] = childWidget;
 			}
-			TrackChildWidgets( child );
+			TrackChildWidgets( child, selectedElement );
 		}
 	}
 }
