@@ -146,15 +146,24 @@ class ControlSheetRow : Widget
 			ControlWidget.Enabled = !property.IsNull;
 		}
 
-		if ( hasLabel )
+		// Skip control widget area for decorator-only carrier properties.
+		// These exist solely to host [Header]/[Space] labels; the widget itself
+		// should be invisible. Only the header label (row 0-1) renders.
+		var isDecoratorOnly = property.TryGetAttribute<EditorAttribute>( out var decoratorEditor )
+			&& decoratorEditor.Value == "DecoratorOnly";
+
+		if ( !isDecoratorOnly )
 		{
-			label.ContentMargins = isExpanded ? new( 0, 0, 0, 4 ) : new( 0, 0, 4, 0 );
-			gridLayout.AddCell( 2, 5, label, xSpan: (isExpanded ? 2 : 1), alignment: TextFlag.LeftTop );
-			gridLayout.AddCell( 3 - (isExpanded ? 1 : 0), 5 + (isExpanded ? 1 : 0), ControlWidget, alignment: TextFlag.LeftTop );
-		}
-		else
-		{
-			gridLayout.AddCell( 2, 5, ControlWidget, xSpan: 2, alignment: TextFlag.LeftTop );
+			if ( hasLabel )
+			{
+				label.ContentMargins = isExpanded ? new( 0, 0, 0, 4 ) : new( 0, 0, 4, 0 );
+				gridLayout.AddCell( 2, 5, label, xSpan: (isExpanded ? 2 : 1), alignment: TextFlag.LeftTop );
+				gridLayout.AddCell( 3 - (isExpanded ? 1 : 0), 5 + (isExpanded ? 1 : 0), ControlWidget, alignment: TextFlag.LeftTop );
+			}
+			else
+			{
+				gridLayout.AddCell( 2, 5, ControlWidget, xSpan: 2, alignment: TextFlag.LeftTop );
+			}
 		}
 
 		var validateAttributes = property.GetAttributes<ValidateAttribute>().ToList();

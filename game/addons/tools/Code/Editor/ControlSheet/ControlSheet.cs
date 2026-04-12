@@ -29,7 +29,28 @@ public class ControlSheet : GridLayout, IControlSheet
 			return;
 
 		_filter = filter;
-		IControlSheet.FilterSortAndAdd( this, obj.ToList() );
+
+		// Log sorted property order when DecoratorOnly props are present (PluginBuilder preview).
+		var allProps = obj.ToList();
+		if ( allProps.Any( p => p.TryGetAttribute<EditorAttribute>( out var ea ) && ea.Value == "DecoratorOnly" ) )
+		{
+			var sorted = allProps
+				.Where( p => ((IControlSheet)this).TestFilter( p ) )
+				.OrderBy( x => x.Order )
+				.ThenBy( x => x.SourceFile )
+				.ThenBy( x => x.SourceLine )
+				.ToList();
+			Log.Info( $"[ControlSheet] AddObject: {sorted.Count} filtered+sorted props" );
+			for ( int i = 0; i < sorted.Count; i++ )
+			{
+				var p = sorted[i];
+				var feat = p.GetAttributes<FeatureAttribute>().FirstOrDefault()?.Identifier ?? "(none)";
+				var ed   = p.TryGetAttribute<EditorAttribute>( out var ea ) ? ea.Value : "(default)";
+				Log.Info( $"  [{i}] '{p.Name}' order={p.Order} srcLine={p.SourceLine} feature={feat} editor={ed}" );
+			}
+		}
+
+		IControlSheet.FilterSortAndAdd( this, allProps );
 		_filter = default;
 	}
 
@@ -156,18 +177,75 @@ public class ControlSheet : GridLayout, IControlSheet
 
 	FeatureTabWidget featureTabs;
 
+	// All properties from the "" default group are buffered here until the first named
+	// Feature group arrives, so they can be split into pre-tab and post-tab rows based
+	// on their source line number relative to the first Feature property.
+	List<SerializedProperty> _bufferedDefaultRows = new();
+
 	void IControlSheet.AddFeature( IControlSheet.Feature feature )
 	{
+		bool isDefaultGroup = string.IsNullOrEmpty( feature.Name );
+
+		if ( isDefaultGroup )
+		{
+			// Buffer ALL rows from the default group — both DecoratorOnly carriers and regular
+			// properties. They'll be placed before or after the tab bar based on srcLine when
+			// the first named Feature group arrives.  This preserves declaration order.
+			_bufferedDefaultRows.AddRange( feature.Properties );
+			Log.Info( $"[ControlSheet] AddFeature(''): buffered {feature.Properties.Count} row(s) for pre/post interleaving" );
+			foreach ( var p in feature.Properties )
+				Log.Info( $"  [ControlSheet]   buffered '{p.Name}' srcLine={p.SourceLine}" );
+			return;
+		}
+
+		// Named Feature group — split any buffered default rows into pre (above tab bar) / post (below).
+		if ( _bufferedDefaultRows.Count > 0 )
+		{
+			int firstTabLine = feature.Properties
+				.Select( p => p.SourceLine )
+				.DefaultIfEmpty( int.MaxValue )
+				.Min();
+
+			var pre  = _bufferedDefaultRows.Where( p => p.SourceLine <  firstTabLine ).OrderBy( p => p.SourceLine ).ToList();
+			var post = _bufferedDefaultRows.Where( p => p.SourceLine >= firstTabLine ).OrderBy( p => p.SourceLine ).ToList();
+			_bufferedDefaultRows.Clear();
+
+			Log.Info( $"[ControlSheet] Flush for feature '{feature.Name}' (firstTabLine={firstTabLine}): {pre.Count} pre-tab, {post.Count} post-tab" );
+
+			foreach ( var p in pre )
+			{
+				Log.Info( $"  [ControlSheet]   PRE  '{p.Name}' srcLine={p.SourceLine}" );
+				AddRow( p );
+			}
+
+			if ( featureTabs is null )
+			{
+				featureTabs = new FeatureTabWidget( null );
+				var guid = FindGuid( feature.Properties.FirstOrDefault() );
+				if ( guid != Guid.Empty ) featureTabs.StateCookie = guid.ToString();
+				AddCell( 0, rows++, featureTabs, xSpan: 2 );
+			}
+			featureTabs.AddFeature( feature );
+
+			foreach ( var p in post )
+			{
+				Log.Info( $"  [ControlSheet]   POST '{p.Name}' srcLine={p.SourceLine}" );
+				AddRow( p );
+			}
+
+			return;
+		}
+
+		// Standard path — no buffered rows to interleave.
+		Log.Info( $"[ControlSheet] AddFeature('{feature.Name}'): {feature.Properties.Count} tab prop(s)" );
+		foreach ( var p in feature.Properties )
+			Log.Info( $"  [ControlSheet]   tab '{p.Name}' srcLine={p.SourceLine} feature='{p.GetAttributes<FeatureAttribute>().FirstOrDefault()?.Identifier}'" );
+
 		if ( featureTabs is null )
 		{
 			featureTabs = new FeatureTabWidget( null );
-
 			var guid = FindGuid( feature.Properties.FirstOrDefault() );
-			if ( guid != Guid.Empty )
-			{
-				featureTabs.StateCookie = guid.ToString();
-			}
-
+			if ( guid != Guid.Empty ) featureTabs.StateCookie = guid.ToString();
 			AddCell( 0, rows++, featureTabs, xSpan: 2 );
 		}
 

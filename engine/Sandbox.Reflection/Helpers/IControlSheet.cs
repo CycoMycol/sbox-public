@@ -37,11 +37,40 @@ public interface IControlSheet
 			var features = properties.GroupBy( x => x.GetAttributes<FeatureAttribute>().FirstOrDefault()?.Identifier ?? defaultFeature ).ToDictionary( x => x.Key, x => x.ToList() );
 			if ( features.Count > 1 || (features.FirstOrDefault().Key ?? defaultFeature) != defaultFeature )
 			{
-				foreach ( var feature in features )
+				// Split DecoratorOnly carrier properties (e.g. [Header]) into two buckets:
+				//   preFeat  — srcLine before the first Feature-tagged property  → render above tab bar
+				//   postFeat — srcLine at/after the first Feature-tagged property → render below tab bar
+				// This preserves the declaration order: Header1, Feature, Header2 renders as
+				// Header1 / [tab bar] / Header2 in the inspector.
+				int minFeatureLine = features
+					.Where( f => f.Key != defaultFeature )
+					.SelectMany( f => f.Value )
+					.Select( p => p.SourceLine )
+					.DefaultIfEmpty( int.MaxValue )
+					.Min();
+
+				var allDecorators = properties
+					.Where( p => p.TryGetAttribute<EditorAttribute>( out var ea ) && ea.Value == "DecoratorOnly" )
+					.ToList();
+
+				var preFeat  = allDecorators.Where( p => p.SourceLine <  minFeatureLine ).ToList();
+				var postFeat = allDecorators.Where( p => p.SourceLine >= minFeatureLine ).ToList();
+
+				// Remove all decorators from their feature groups before adding tabs
+				foreach ( var featureGroup in features.Values )
+					featureGroup.RemoveAll( p => p.TryGetAttribute<EditorAttribute>( out var ea ) && ea.Value == "DecoratorOnly" );
+
+				if ( preFeat.Count > 0 )
+					sheet.AddPropertiesWithGrouping( preFeat );
+
+				foreach ( var feature in features.Where( f => f.Value.Count > 0 ) )
 				{
 					var csf = new Feature( feature.Value );
 					sheet.AddFeature( csf );
 				}
+
+				if ( postFeat.Count > 0 )
+					sheet.AddPropertiesWithGrouping( postFeat );
 
 				return;
 			}
