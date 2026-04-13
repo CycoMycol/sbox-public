@@ -1,4 +1,4 @@
-﻿using Sandbox.Internal;
+using Sandbox.Internal;
 
 namespace Editor;
 
@@ -182,8 +182,50 @@ public class FeatureTabWidget : Widget
 	{
 		string title = feature.Name;
 		string icon = feature.Icon;
-		string desc = feature.Description;
-		Color tint = tint = Theme.GetTint( feature.Tint );
+		string desc = feature.Description ?? "";
+		Color tint = Theme.GetTint( feature.Tint );
+
+		// Parse PluginBuilder style from Description field: "__pb_style:bold;labelColor=#DEBE0B;bg=#0A0303"
+		// FeatureStyleAttribute is not yet in the compiled engine DLL, so we encode style here instead.
+		bool labelBold = false;
+		string bgHexColor = "";
+
+		if ( desc.StartsWith( "__pb_style:", System.StringComparison.Ordinal ) )
+		{
+			var styleStr = desc["__pb_style:".Length..];
+			Log.Info( $"[PluginBuilder] FeatureTabWidget.AddFeature: '{title}' — parsing style: '{styleStr}'" );
+
+			ParsePbStyle( styleStr, out labelBold, out var labelHexColor, out var bgHex );
+
+			if ( !string.IsNullOrEmpty( labelHexColor ) )
+			{
+				var parsed = Color.Parse( labelHexColor );
+				if ( parsed.HasValue )
+				{
+					tint = parsed.Value;
+					Log.Info( $"[PluginBuilder] FeatureTabWidget: '{title}' labelColor='{labelHexColor}' → tint={tint}" );
+				}
+				else
+				{
+					Log.Warning( $"[PluginBuilder] FeatureTabWidget: '{title}' labelColor parse FAILED for '{labelHexColor}'" );
+				}
+			}
+
+			if ( !string.IsNullOrEmpty( bgHex ) )
+			{
+				bgHexColor = bgHex;
+				Log.Info( $"[PluginBuilder] FeatureTabWidget: '{title}' bgColor='{bgHexColor}'" );
+			}
+
+			Log.Info( $"[PluginBuilder] FeatureTabWidget: '{title}' final bold={labelBold} tint={tint} bg='{bgHexColor}'" );
+
+			// Clear the style encoding so it doesn't appear as a tooltip
+			desc = "";
+		}
+		else
+		{
+			Log.Info( $"[PluginBuilder] FeatureTabWidget.AddFeature: '{title}' no PB style (desc='{desc}')" );
+		}
 
 		if ( string.IsNullOrEmpty( title ) )
 		{
@@ -192,6 +234,8 @@ public class FeatureTabWidget : Widget
 
 		var tab = new FeatureTabOption( this, title, icon, desc, tint, this );
 		tab.Feature = feature;
+		tab.LabelBold = labelBold;
+		tab.BackgroundHexColor = bgHexColor;
 
 		if ( tab.FeatureEnabled is not null && !tab.FeatureEnabled.As.Bool )
 		{
@@ -199,7 +243,28 @@ public class FeatureTabWidget : Widget
 		}
 
 		AddTab( tab );
+	}
 
+	/// <summary>
+	/// Parses __pb_style string (e.g. "bold;labelColor=#DEBE0B;bg=#0A0303") into components.
+	/// </summary>
+	private static void ParsePbStyle( string styleStr, out bool bold, out string labelColor, out string bgColor )
+	{
+		bold = false;
+		labelColor = null;
+		bgColor = null;
+
+		var parts = styleStr.Split( ';', System.StringSplitOptions.RemoveEmptyEntries );
+		foreach ( var part in parts )
+		{
+			var trimmed = part.Trim();
+			if ( trimmed.Equals( "bold", System.StringComparison.OrdinalIgnoreCase ) )
+				bold = true;
+			else if ( trimmed.StartsWith( "labelColor=", System.StringComparison.OrdinalIgnoreCase ) )
+				labelColor = trimmed[11..];
+			else if ( trimmed.StartsWith( "bg=", System.StringComparison.OrdinalIgnoreCase ) )
+				bgColor = trimmed[3..];
+		}
 	}
 }
 
@@ -212,6 +277,18 @@ public class FeatureTabOption : Widget
 	public int Index { get; set; }
 	public bool IsSelected { get; set; }
 	public Color Tint { get; set; }
+
+	/// <summary>
+	/// Whether the tab label should be rendered bold.
+	/// Set from FeatureStyleAttribute via IControlSheet.Feature.LabelBold.
+	/// </summary>
+	public bool LabelBold { get; set; }
+
+	/// <summary>
+	/// Hex background tint for the tab button. Empty = default.
+	/// Set from FeatureStyleAttribute via IControlSheet.Feature.BackgroundHexColor.
+	/// </summary>
+	public string BackgroundHexColor { get; set; } = "";
 
 	public IControlSheet.Feature Feature { get; set; }
 
@@ -290,51 +367,6 @@ public class FeatureTabOption : Widget
 		UpdateVisibility();
 	}
 
-	protected override void OnContextMenu( ContextMenuEvent e )
-	{
-		Owner?.Select( this );
-		e.Accepted = true;
-
-		var menu = new ContextMenu( this );
-
-		{
-			var o = new Option( $"Remove {Name} Feature", "close" );
-			o.Enabled = CanFeatureBeRemoved;
-			o.Triggered = RemoveFeature;
-			menu.AddOption( o );
-		}
-
-		{
-			menu.AddSeparator();
-			menu.AddOption( $"Copy {Name} Properties", "content_copy", () =>
-			{
-				ClipboardTools.CopyProperties( Name, Feature.Properties );
-			} );
-			var pasteOption = menu.AddOption( $"Paste {Name} Properties", "content_paste", () =>
-			{
-				ClipboardTools.PasteProperties( Name, Feature.Properties );
-			} );
-			pasteOption.Enabled = ClipboardTools.CanPasteProperties( Name, Feature.Properties );
-			menu.AddOption( "Reset all to Default", "restart_alt", () =>
-			{
-				foreach ( var prop in Feature.Properties )
-				{
-					prop.SetValue( prop.GetDefault() );
-				}
-			} );
-		}
-
-		if ( FeatureEnabled is not null && CodeEditor.CanOpenFile( FeatureEnabled.SourceFile ) )
-		{
-			menu.AddSeparator();
-
-			var filename = System.IO.Path.GetFileName( FeatureEnabled.SourceFile );
-			menu.AddOption( $"Jump to code", "code", action: () => CodeEditor.OpenFile( FeatureEnabled.SourceFile, FeatureEnabled.SourceLine ) );
-		}
-
-		menu.OpenAtCursor();
-	}
-
 	public void UpdateVisibility()
 	{
 		if ( FeatureEnabled is null ) return;
@@ -372,8 +404,6 @@ public class FeatureTabOption : Widget
 		if ( IsSelected )
 		{
 			var rr = LocalRect.Shrink( 0, 0, 0, 0 );
-			var underline = rr;
-			underline.Bottom = underline.Top + 2;
 
 			Paint.SetBrush( Theme.WidgetBackground.Lighten( 0.2f ) );
 			Paint.DrawRect( rr.Grow( 0, 0, 0, 0 ), 4 );
@@ -388,6 +418,18 @@ public class FeatureTabOption : Widget
 			if ( Paint.HasMouseOver ) alpha += 0.4f;
 		}
 
+		// Custom background tint (drawn over the selection decoration so it's always visible)
+		if ( !string.IsNullOrEmpty( BackgroundHexColor ) )
+		{
+			var bgParsed = Color.Parse( BackgroundHexColor );
+			if ( bgParsed.HasValue )
+			{
+				Paint.ClearPen();
+				Paint.SetBrush( bgParsed.Value.WithAlpha( IsSelected ? 0.35f : 0.18f ) );
+				Paint.DrawRect( r, 3 );
+			}
+		}
+
 		if ( !ShowText && !IsSelected )
 		{
 			Paint.ClearBrush();
@@ -396,7 +438,7 @@ public class FeatureTabOption : Widget
 			return;
 		}
 
-		Paint.SetDefaultFont( 8 );
+		Paint.SetDefaultFont( 8, LabelBold ? 700 : 400 );
 		Paint.ClearBrush();
 		Paint.SetPen( Tint.WithAlpha( alpha ) );
 

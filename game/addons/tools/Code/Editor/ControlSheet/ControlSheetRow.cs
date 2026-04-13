@@ -16,6 +16,12 @@ class ControlSheetRow : Widget
 	GridLayout gridLayout;
 	GridLayout validateResultContainer;
 
+	/// <summary>
+	/// Background color set by __pb_hdr_style encoded in Description attribute.
+	/// Drawn in OnPaint before base call.
+	/// </summary>
+	private Color? _headerBgColor = null;
+
 	public ControlSheetRow( SerializedProperty property, ControlWidget editor )
 	{
 		this.property = property;
@@ -81,6 +87,14 @@ class ControlSheetRow : Widget
 
 	protected override void OnPaint()
 	{
+		// Draw custom header background if set by __pb_hdr_style
+		if ( _headerBgColor.HasValue )
+		{
+			Paint.ClearPen();
+			Paint.SetBrush( _headerBgColor.Value );
+			Paint.DrawRect( LocalRect );
+		}
+
 		base.OnPaint();
 
 		var isPropertyOverridden = EditorUtility.Prefabs.IsPropertyOverridden( property ) || EditorUtility.Prefabs.IsComponentAddedToInstance( property.Parent?.Targets?.OfType<Component>().FirstOrDefault() );
@@ -129,7 +143,68 @@ class ControlSheetRow : Widget
 
 		if ( property.TryGetAttribute( out HeaderAttribute headerAttribute ) )
 		{
-			var header = new Label.Header( headerAttribute.Title );
+			// Check for PluginBuilder header style encoded as Description("__pb_hdr_style:...") on the carrier property
+			Color? hdrLabelColor = null;
+			bool hdrBold = false;
+			_headerBgColor = null;
+
+			if ( property.TryGetAttribute<DescriptionAttribute>( out var descAttr )
+				&& descAttr?.Value?.StartsWith( "__pb_hdr_style:", System.StringComparison.Ordinal ) == true )
+			{
+				var styleStr = descAttr.Value["__pb_hdr_style:".Length..];
+				Log.Info( $"[PluginBuilder] ControlSheetRow: Parsing hdr style '{styleStr}' for '{headerAttribute.Title}'" );
+				ParsePbStyle( styleStr, out hdrBold, out var hdrLabelHex, out var hdrBgHex );
+
+				if ( !string.IsNullOrEmpty( hdrLabelHex ) )
+				{
+					var parsed = Color.Parse( hdrLabelHex );
+					if ( parsed.HasValue )
+					{
+						hdrLabelColor = parsed.Value;
+						Log.Info( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' labelColor parsed: '{hdrLabelHex}' → {hdrLabelColor}" );
+					}
+					else
+					{
+						Log.Warning( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' labelColor parse FAILED for '{hdrLabelHex}'" );
+					}
+				}
+
+				if ( !string.IsNullOrEmpty( hdrBgHex ) )
+				{
+					var parsed = Color.Parse( hdrBgHex );
+					if ( parsed.HasValue )
+					{
+						_headerBgColor = parsed.Value;
+						Log.Info( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' bgColor parsed: '{hdrBgHex}' → {_headerBgColor}" );
+					}
+					else
+					{
+						Log.Warning( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' bgColor parse FAILED for '{hdrBgHex}'" );
+					}
+				}
+			}
+			else
+			{
+				Log.Info( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' — no __pb_hdr_style (descAttr='{descAttr?.Value}')" );
+			}
+
+			Label header;
+			if ( hdrLabelColor.HasValue || hdrBold )
+			{
+				// Build custom-styled label to apply colour/bold overrides
+				header = new Label( headerAttribute.Title );
+				var weight = hdrBold ? "800" : "700";
+				var colorStr = hdrLabelColor.HasValue
+					? $"color: #{ColorToHex( hdrLabelColor.Value )};"
+					: "color: #ccc;";
+				header.SetStyles( $"font-size: 11px; font-weight: {weight}; padding: 4px 0 2px 0; {colorStr}" );
+				Log.Info( $"[PluginBuilder] ControlSheetRow: '{headerAttribute.Title}' applying label styles weight={weight} {colorStr}" );
+			}
+			else
+			{
+				header = new Label.Header( headerAttribute.Title );
+			}
+
 			gridLayout.AddCell( 0, 1, header, 10, 1 );
 		}
 
@@ -341,6 +416,34 @@ class ControlSheetRow : Widget
 		} );
 		setter.Enabled = Json.Serialize( prop.GetValue<object>() ) != Json.Serialize( property.GetValue<object>() );
 	}
+
+	/// <summary>
+	/// Parses __pb_style / __pb_hdr_style strings (e.g. "bold;labelColor=#DEBE0B;bg=#0A0303").
+	/// </summary>
+	private static void ParsePbStyle( string styleStr, out bool bold, out string labelColor, out string bgColor )
+	{
+		bold = false;
+		labelColor = null;
+		bgColor = null;
+
+		var parts = styleStr.Split( ';', System.StringSplitOptions.RemoveEmptyEntries );
+		foreach ( var part in parts )
+		{
+			var trimmed = part.Trim();
+			if ( trimmed.Equals( "bold", System.StringComparison.OrdinalIgnoreCase ) )
+				bold = true;
+			else if ( trimmed.StartsWith( "labelColor=", System.StringComparison.OrdinalIgnoreCase ) )
+				labelColor = trimmed[11..];
+			else if ( trimmed.StartsWith( "bg=", System.StringComparison.OrdinalIgnoreCase ) )
+				bgColor = trimmed[3..];
+		}
+	}
+
+	/// <summary>
+	/// Converts a Color (r/g/b in 0-1 range) to an uppercase 6-char hex string (no leading #).
+	/// </summary>
+	private static string ColorToHex( Color c ) =>
+		$"{(int)(c.r * 255f):X2}{(int)(c.g * 255f):X2}{(int)(c.b * 255f):X2}";
 }
 
 internal class InfoBoxWidget : Widget
